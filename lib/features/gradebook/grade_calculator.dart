@@ -10,4 +10,10 @@ class GradeCalculator {
     return percentage(earned, possible);
   }
   static double finalGrade(Map<double, double> categoryPercentages) => categoryPercentages.entries.fold(0, (sum, e) => sum + e.key * e.value / 100);
+
+  static double weightTotal(Iterable<num> weights) =>
+      weights.fold<double>(0, (sum, weight) => sum + weight.toDouble());
+
+  static bool hasValidWeightTotal(Iterable<num> weights) =>
+      (weightTotal(weights) - 100).abs() < 0.001;
 }

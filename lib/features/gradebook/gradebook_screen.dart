@@ -16,16 +16,29 @@ class _GradebookScreenState extends State<GradebookScreen> {
   bool loading=true, saving=false;
   List<Map<String,dynamic>> enrollments=[], items=[];
   final Map<String,num?> scores={};
+  String gradingPeriod='prelim';
+  Map<String,double> weights=Map.of(_defaultWeights);
   Timer? debounce;
+
+  static const Map<String,double> _defaultWeights={
+    'participation':10,
+    'quiz':20,
+    'assignment':20,
+    'attendance':10,
+    'examination':40,
+  };
 
   @override void initState(){super.initState();load();}
   Future<void> load() async {
     try {
       final roster=await supabase.from('class_enrollments').select('id, students(id, student_number, last_name, first_name)').eq('class_id',widget.classId).eq('status','active');
       final assessments=await supabase.from('assessment_items').select().eq('class_id',widget.classId).eq('category','quiz').eq('archived',false).order('position');
+      final savedWeights=await supabase.from('grading_weights').select('category, weight').eq('class_id',widget.classId).eq('grading_period',gradingPeriod);
       final current=await supabase.from('scores').select('enrollment_id, assessment_item_id, raw_score').inFilter('assessment_item_id', List.from(assessments).map((e)=>e['id']).toList());
       for(final row in current){scores['${row['enrollment_id']}:${row['assessment_item_id']}']=row['raw_score'];}
-      setState((){enrollments=List.from(roster);items=List.from(assessments);loading=false;});
+      final loaded=Map<String,double>.of(_defaultWeights);
+      for(final row in savedWeights){loaded['${row['category']}']=(row['weight'] as num).toDouble();}
+      setState((){enrollments=List.from(roster);items=List.from(assessments);weights=loaded;loading=false;});
     } catch(e){if(mounted){setState(()=>loading=false);ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Gradebook could not be loaded: $e')));}}
   }
   void changeScore(String enrollmentId,String itemId,num? value,num maximum){
@@ -33,13 +46,32 @@ class _GradebookScreenState extends State<GradebookScreen> {
     setState((){scores['$enrollmentId:$itemId']=value;saving=true;});debounce?.cancel();debounce=Timer(const Duration(milliseconds:700),()=>save(enrollmentId,itemId,value));
   }
   Future<void> save(String enrollmentId,String itemId,num? value) async {await supabase.from('scores').upsert({'enrollment_id':enrollmentId,'assessment_item_id':itemId,'raw_score':value,'status':value==null?'missing':'scored','updated_by':supabase.auth.currentUser!.id},onConflict:'enrollment_id,assessment_item_id');if(mounted)setState(()=>saving=false);}
+  Future<void> editWeights() async {
+    final updated=await showDialog<Map<String,double>>(context: context,builder: (_)=>_WeightDialog(initial: weights));
+    if(updated==null)return;
+    setState(()=>saving=true);
+    try {
+      await supabase.from('grading_weights').upsert(
+        updated.entries.map((entry)=>{
+          'class_id':widget.classId,
+          'grading_period':gradingPeriod,
+          'category':entry.key,
+          'weight':entry.value,
+          'updated_at':DateTime.now().toUtc().toIso8601String(),
+        }).toList(),
+        onConflict:'class_id,grading_period,category',
+      );
+      if(mounted){setState(()=>weights=updated);ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Grading percentages saved.')));}
+    } catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Percentages could not be saved: $e')));}
+    finally{if(mounted)setState(()=>saving=false);}
+  }
   @override void dispose(){debounce?.cancel();super.dispose();}
 
   @override
   Widget build(BuildContext context) => WorkspaceShell(
     title: 'Quiz Gradebook',
     active: 'Gradebook',
-    actions: [Container(padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7), decoration: BoxDecoration(color: saving ? SmartGradeColors.mustardSoft : const Color(0xFFEAF4EC), borderRadius: BorderRadius.circular(18)), child: Row(children: [Icon(saving ? Icons.sync : Icons.cloud_done_outlined, size: 15, color: saving ? SmartGradeColors.black : const Color(0xFF347147)), const SizedBox(width: 6), Text(saving ? 'Saving…' : 'All changes saved', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700))]))],
+    actions: [OutlinedButton.icon(onPressed:saving?null:editWeights,icon:const Icon(Icons.tune_rounded,size:17),label:const Text('Grading percentages')),const SizedBox(width:10),Container(padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7), decoration: BoxDecoration(color: saving ? SmartGradeColors.mustardSoft : const Color(0xFFEAF4EC), borderRadius: BorderRadius.circular(18)), child: Row(children: [Icon(saving ? Icons.sync : Icons.cloud_done_outlined, size: 15, color: saving ? SmartGradeColors.black : const Color(0xFF347147)), const SizedBox(width: 6), Text(saving ? 'Saving…' : 'All changes saved', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700))]))],
     child: loading ? const Center(child: CircularProgressIndicator()) : Padding(
       padding: const EdgeInsets.all(24),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -76,6 +108,37 @@ class _GradebookScreenState extends State<GradebookScreen> {
       ]),
     ),
   );
+}
+
+class _WeightDialog extends StatefulWidget {
+  const _WeightDialog({required this.initial});
+  final Map<String,double> initial;
+  @override State<_WeightDialog> createState()=>_WeightDialogState();
+}
+
+class _WeightDialogState extends State<_WeightDialog> {
+  late final Map<String,TextEditingController> controllers={
+    for(final entry in widget.initial.entries) entry.key:TextEditingController(text:entry.value.toStringAsFixed(entry.value%1==0?0:2)),
+  };
+  static const labels={
+    'participation':'Participation','quiz':'Quizzes','assignment':'Assignments','attendance':'Attendance','examination':'Examination',
+  };
+  Map<String,double> get values=>{for(final entry in controllers.entries) entry.key:double.tryParse(entry.value.text.trim())??0};
+  double get total=>GradeCalculator.weightTotal(values.values);
+  @override void dispose(){for(final controller in controllers.values){controller.dispose();}super.dispose();}
+  @override Widget build(BuildContext context){
+    final valid=GradeCalculator.hasValidWeightTotal(values.values);
+    return AlertDialog(
+      title:const Text('Grading percentages'),
+      content:SizedBox(width:430,child:SingleChildScrollView(child:Column(mainAxisSize:MainAxisSize.min,crossAxisAlignment:CrossAxisAlignment.start,children:[
+        const Text('Set the percentage for each category. These settings apply to the selected class and grading period.',style:TextStyle(color:SmartGradeColors.muted,fontSize:12)),
+        const SizedBox(height:16),
+        ...controllers.entries.map((entry)=>Padding(padding:const EdgeInsets.only(bottom:10),child:TextField(controller:entry.value,keyboardType:const TextInputType.numberWithOptions(decimal:true),onChanged:(_)=>setState((){}),decoration:InputDecoration(labelText:labels[entry.key],suffixText:'%',helperText:entry.key=='examination'?'Workbook default: 40%':null)))),
+        Container(padding:const EdgeInsets.all(12),decoration:BoxDecoration(color:valid?const Color(0xFFEAF4EC):const Color(0xFFFFE8E8),borderRadius:BorderRadius.circular(8)),child:Row(children:[Icon(valid?Icons.check_circle_outline:Icons.error_outline,color:valid?const Color(0xFF347147):SmartGradeColors.red),const SizedBox(width:9),Expanded(child:Text('Total: ${total.toStringAsFixed(total%1==0?0:2)}%${valid?' — Ready to save':' — Must equal 100%'}',style:TextStyle(fontWeight:FontWeight.w800,color:valid?const Color(0xFF347147):SmartGradeColors.red)))])),
+      ]))),
+      actions:[TextButton(onPressed:()=>Navigator.pop(context),child:const Text('Cancel')),FilledButton(onPressed:valid?()=>Navigator.pop(context,values):null,child:const Text('Save percentages'))],
+    );
+  }
 }
 
 class _Pill extends StatelessWidget {
