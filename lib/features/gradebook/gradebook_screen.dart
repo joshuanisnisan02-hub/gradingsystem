@@ -22,6 +22,7 @@ class _GradebookScreenState extends State<GradebookScreen> {
   String gradingPeriod='prelim';
   String category='quiz';
   int gradingBase=30;
+  Map<String,dynamic>? classInfo;
   Map<String,double> weights=Map.of(_defaultWeights);
   final Map<String,Timer> scoreDebounces={};
 
@@ -46,13 +47,13 @@ class _GradebookScreenState extends State<GradebookScreen> {
       final assessments=List<Map<String,dynamic>>.from(await assessmentQuery.order('category').order('position').order('created_at'));
       assessments.sort(_compareAssessmentItems);
       final savedWeights=await supabase.from('grading_weights').select('category, weight').eq('class_id',widget.classId).eq('grading_period',gradingPeriod);
-      final classSettings=await supabase.from('classes').select('grading_base').eq('id',widget.classId).single();
+      final classSettings=await supabase.from('classes').select('grading_base, subject_code, subject_title, section').eq('id',widget.classId).single();
       final current=assessments.isEmpty ? <dynamic>[] : await supabase.from('scores').select('enrollment_id, assessment_item_id, raw_score').inFilter('assessment_item_id', assessments.map((e)=>e['id']).toList());
       scores.clear();
       for(final row in current){scores['${row['enrollment_id']}:${row['assessment_item_id']}']=row['raw_score'];}
       final loaded=Map<String,double>.of(_defaultWeights);
       for(final row in savedWeights){loaded['${row['category']}']=(row['weight'] as num).toDouble();}
-      setState((){enrollments=List.from(roster);items=assessments;weights=loaded;gradingBase=(classSettings['grading_base'] as num?)?.toInt()??30;loading=false;});
+      setState((){enrollments=List.from(roster);items=assessments;weights=loaded;classInfo=Map<String,dynamic>.from(classSettings);gradingBase=(classSettings['grading_base'] as num?)?.toInt()??30;loading=false;});
     } catch(e){if(mounted){setState(()=>loading=false);ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Gradebook could not be loaded: $e')));}}
   }
   void changeScore(String enrollmentId,String itemId,num? value,num maximum){
@@ -145,14 +146,14 @@ class _GradebookScreenState extends State<GradebookScreen> {
 
   @override
   Widget build(BuildContext context) => WorkspaceShell(
-    title: 'Class Gradebook',
+    title: classInfo==null?'Class Gradebook':'${classInfo!['subject_code']} · ${classInfo!['section']}',
     active: 'Gradebook',
     actions: [OutlinedButton.icon(onPressed:saving?null:editWeights,icon:const Icon(Icons.tune_rounded,size:17),label:const Text('Grading settings')),const SizedBox(width:10),Container(padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7), decoration: BoxDecoration(color: saving ? SmartGradeColors.mustardSoft : const Color(0xFFEAF4EC), borderRadius: BorderRadius.circular(18)), child: Row(children: [Icon(saving ? Icons.sync : Icons.cloud_done_outlined, size: 15, color: saving ? SmartGradeColors.black : const Color(0xFF347147)), const SizedBox(width: 6), Text(saving ? 'Saving…' : 'All changes saved', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700))]))],
     child: loading ? const Center(child: CircularProgressIndicator()) : Padding(
       padding: const EdgeInsets.all(24),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Wrap(runSpacing: 12, spacing: 12, crossAxisAlignment: WrapCrossAlignment.center, children: [
-          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('GRADE ENTRY', style: TextStyle(fontSize: 9, letterSpacing: 1.4, color: SmartGradeColors.red, fontWeight: FontWeight.w800)),const SizedBox(height: 5),Text('${_periodLabels[gradingPeriod]} · ${_categoryLabels[category]}', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800))]),
+          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('${classInfo?['subject_title']??'GRADE ENTRY'}'.toUpperCase(), style: const TextStyle(fontSize: 9, letterSpacing: 1.4, color: SmartGradeColors.red, fontWeight: FontWeight.w800)),const SizedBox(height: 5),Text('${_periodLabels[gradingPeriod]} · ${_categoryLabels[category]}', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800))]),
           const SizedBox(width: 18),
           _Pill(icon: Icons.people_outline, text: '${enrollments.length} students'),
           _Pill(icon: Icons.assignment_outlined, text: '${items.length} activities'),

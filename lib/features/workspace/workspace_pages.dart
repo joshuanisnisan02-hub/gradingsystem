@@ -22,13 +22,13 @@ class GradebooksScreen extends StatelessWidget {
           description: 'Each gradebook only shows the students and assessment records belonging to that class.',
           child: classes.isEmpty
               ? _EmptyPanel(icon: Icons.table_chart_outlined, title: 'No gradebooks available', message: 'Create a class first. Its gradebook will automatically appear here.', actionLabel: 'Create a class', onAction: () => context.go('/classes'))
-              : Wrap(spacing: 14, runSpacing: 14, children: classes.map((item) => _ActionCard(
+              : Align(alignment: Alignment.topLeft, child: Wrap(alignment: WrapAlignment.start, spacing: 14, runSpacing: 14, children: classes.map((item) => _ActionCard(
                   icon: Icons.menu_book_rounded,
                   title: '${item['subject_code']} · ${item['section']}',
                   subtitle: '${item['subject_title']}',
                   action: 'Open gradebook',
                   onTap: () => context.go('/classes/${item['id']}/gradebook'),
-                )).toList()),
+                )).toList())),
         );
       },
     ),
@@ -113,7 +113,7 @@ class SettingsScreen extends StatelessWidget {
 class _PageBody extends StatelessWidget {
   const _PageBody({required this.eyebrow, required this.title, required this.description, required this.child});
   final String eyebrow; final String title; final String description; final Widget child;
-  @override Widget build(BuildContext context) => SingleChildScrollView(padding: const EdgeInsets.all(26), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(eyebrow, style: const TextStyle(fontSize: 10, color: SmartGradeColors.red, letterSpacing: 1.5, fontWeight: FontWeight.w800)), const SizedBox(height: 7), Text(title, style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w800)), const SizedBox(height: 7), Text(description, style: const TextStyle(color: SmartGradeColors.muted)), const SizedBox(height: 24), child]));
+  @override Widget build(BuildContext context) => SingleChildScrollView(padding: const EdgeInsets.all(26), child: Align(alignment: Alignment.topLeft, child: SizedBox(width: double.infinity, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(eyebrow, style: const TextStyle(fontSize: 10, color: SmartGradeColors.red, letterSpacing: 1.5, fontWeight: FontWeight.w800)), const SizedBox(height: 7), Text(title, style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w800)), const SizedBox(height: 7), Text(description, style: const TextStyle(color: SmartGradeColors.muted)), const SizedBox(height: 24), child]))));
 }
 
 class _ActionCard extends StatelessWidget {
