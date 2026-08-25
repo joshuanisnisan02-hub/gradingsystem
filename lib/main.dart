@@ -10,11 +10,16 @@ import 'core/design_system.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  const url = String.fromEnvironment('SUPABASE_URL');
-  const key = String.fromEnvironment('SUPABASE_PUBLISHABLE_KEY');
-  if (url.isNotEmpty && key.isNotEmpty) {
-    await Supabase.initialize(url: url, anonKey: key);
-  }
+  const url = String.fromEnvironment(
+    'SUPABASE_URL',
+    defaultValue: 'https://buwqtthzzrgbmpieakay.supabase.co',
+  );
+  const key = String.fromEnvironment(
+    'SUPABASE_PUBLISHABLE_KEY',
+    defaultValue: 'sb_publishable_3rjcoooXdoEBpN_ingWzfA_R9j-Od2T',
+  );
+
+  await Supabase.initialize(url: url, anonKey: key);
   runApp(const ProviderScope(child: SmartGradeApp()));
 }
 
