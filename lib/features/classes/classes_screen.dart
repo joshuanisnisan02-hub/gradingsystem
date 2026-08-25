@@ -134,7 +134,7 @@ class _ClassesScreenState extends State<ClassesScreen> {
       if(confirmed==null||confirmed.isEmpty)return;
       final teacherId=supabase.auth.currentUser!.id;
       final existingData=await supabase.from('classes').select('subject_code, section').eq('teacher_id',teacherId);
-      final existing={for(final row in existingData)'${row['subject_code']}'.trim().toUpperCase()+'|'+'${row['section']}'.trim().toUpperCase()};
+      final existing={for(final row in existingData)"${row['subject_code']}|${row['section']}".trim().toUpperCase()};
       final toCreate=confirmed.where((item)=>!existing.contains(item.key)).map((item)=>{'subject_code':item.subjectCode.trim(),'subject_title':item.subjectTitle.trim(),'section':item.section.trim(),'teacher_id':teacherId}).toList();
       if(toCreate.isNotEmpty)await supabase.from('classes').insert(toCreate);
       await load();
