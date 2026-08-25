@@ -102,7 +102,7 @@ class ReportsScreen extends StatelessWidget {
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
   @override
-  Widget build(BuildContext context) => WorkspaceShell(title: 'Settings', active: 'Settings', child: const _PageBody(
+  Widget build(BuildContext context) => const WorkspaceShell(title: 'Settings', active: 'Settings', child: _PageBody(
     eyebrow: 'WORKSPACE SETTINGS',
     title: 'SmartGrade preferences',
     description: 'Your account is connected to Supabase. More grading and integration preferences can be added here.',
