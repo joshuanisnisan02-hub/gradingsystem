@@ -55,9 +55,13 @@ class _IconRail extends StatelessWidget {
       const SizedBox(height: 16),
       const Icon(Icons.school_rounded, color: SmartGradeColors.mustard, size: 27),
       const SizedBox(height: 28),
-      ...[Icons.grid_view_rounded, Icons.people_alt_outlined, Icons.fact_check_outlined, Icons.bar_chart_rounded, Icons.cloud_sync_outlined].map((icon) => Padding(padding: const EdgeInsets.only(bottom: 10), child: IconButton(onPressed: () {}, icon: Icon(icon, color: Colors.white70, size: 20)))),
+      _RailButton(icon: Icons.grid_view_rounded, route: '/classes', tooltip: 'Classes'),
+      _RailButton(icon: Icons.table_chart_outlined, route: '/gradebooks', tooltip: 'Gradebooks'),
+      _RailButton(icon: Icons.people_alt_outlined, route: '/students', tooltip: 'Students'),
+      _RailButton(icon: Icons.cloud_sync_outlined, route: '/imports', tooltip: 'Imports & Sync'),
+      _RailButton(icon: Icons.bar_chart_rounded, route: '/reports', tooltip: 'Reports'),
       const Spacer(),
-      IconButton(onPressed: () {}, icon: const Icon(Icons.settings_outlined, color: Colors.white70, size: 20)),
+      IconButton(tooltip: 'Settings', onPressed: () => context.go('/settings'), icon: const Icon(Icons.settings_outlined, color: Colors.white70, size: 20)),
       const SizedBox(height: 14),
     ])),
   );
@@ -78,10 +82,10 @@ class _Navigation extends StatelessWidget {
       const Padding(padding: EdgeInsets.symmetric(horizontal: 20), child: Text('TEACHER WORKSPACE', style: TextStyle(color: Colors.white38, fontSize: 9, fontWeight: FontWeight.w700, letterSpacing: 1.2))),
       const SizedBox(height: 9),
       _NavItem(label: 'Classes', icon: Icons.dashboard_outlined, active: active == 'Classes', onTap: () => context.go('/classes')),
-      _NavItem(label: 'Gradebook', icon: Icons.table_chart_outlined, active: active == 'Gradebook', onTap: () {}),
-      _NavItem(label: 'Students', icon: Icons.people_outline, active: active == 'Students', onTap: () {}),
-      _NavItem(label: 'Imports & Sync', icon: Icons.sync_rounded, badge: '2', active: active == 'Imports', onTap: () {}),
-      _NavItem(label: 'Reports', icon: Icons.description_outlined, active: active == 'Reports', onTap: () {}),
+      _NavItem(label: 'Gradebooks', icon: Icons.table_chart_outlined, active: active == 'Gradebooks' || active == 'Gradebook', onTap: () => context.go('/gradebooks')),
+      _NavItem(label: 'Students', icon: Icons.people_outline, active: active == 'Students', onTap: () => context.go('/students')),
+      _NavItem(label: 'Imports & Sync', icon: Icons.sync_rounded, badge: '2', active: active == 'Imports', onTap: () => context.go('/imports')),
+      _NavItem(label: 'Reports', icon: Icons.description_outlined, active: active == 'Reports', onTap: () => context.go('/reports')),
       const Padding(padding: EdgeInsets.fromLTRB(20, 24, 20, 10), child: Text('QUICK FILTERS', style: TextStyle(color: Colors.white38, fontSize: 9, fontWeight: FontWeight.w700, letterSpacing: 1.2))),
       const _Filter(label: 'Active classes', color: SmartGradeColors.red),
       const _Filter(label: 'Missing scores', color: SmartGradeColors.mustard),
@@ -93,6 +97,18 @@ class _Navigation extends StatelessWidget {
         icon: const Icon(Icons.logout_rounded, size: 17), label: const Text('Sign out'),
       )),
     ])),
+  );
+}
+
+class _RailButton extends StatelessWidget {
+  const _RailButton({required this.icon, required this.route, required this.tooltip});
+  final IconData icon;
+  final String route;
+  final String tooltip;
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 8),
+    child: IconButton(tooltip: tooltip, onPressed: () => context.go(route), icon: Icon(icon, color: Colors.white70, size: 20)),
   );
 }
 

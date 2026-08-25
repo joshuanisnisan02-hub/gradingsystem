@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'features/auth/login_screen.dart';
 import 'features/classes/classes_screen.dart';
 import 'features/gradebook/gradebook_screen.dart';
+import 'features/workspace/workspace_pages.dart';
 import 'core/design_system.dart';
 
 Future<void> main() async {
@@ -35,6 +36,11 @@ final routerProvider = Provider<GoRouter>((ref) {
     routes: [
       GoRoute(path: '/login', builder: (_, __) => const LoginScreen()),
       GoRoute(path: '/classes', builder: (_, __) => const ClassesScreen()),
+      GoRoute(path: '/gradebooks', builder: (_, __) => const GradebooksScreen()),
+      GoRoute(path: '/students', builder: (_, __) => const StudentsScreen()),
+      GoRoute(path: '/imports', builder: (_, __) => const ImportsScreen()),
+      GoRoute(path: '/reports', builder: (_, __) => const ReportsScreen()),
+      GoRoute(path: '/settings', builder: (_, __) => const SettingsScreen()),
       GoRoute(
         path: '/classes/:classId/gradebook',
         builder: (_, state) => GradebookScreen(classId: state.pathParameters['classId']!),

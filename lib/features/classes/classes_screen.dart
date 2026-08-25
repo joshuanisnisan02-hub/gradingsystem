@@ -53,8 +53,13 @@ class _ClassesScreenState extends State<ClassesScreen> {
       ],
     ));
     if (accepted != true || code.text.trim().isEmpty || title.text.trim().isEmpty || section.text.trim().isEmpty) return;
-    await supabase.from('classes').insert({'subject_code': code.text.trim(), 'subject_title': title.text.trim(), 'section': section.text.trim(), 'teacher_id': supabase.auth.currentUser!.id});
-    await load();
+    try {
+      await supabase.from('classes').insert({'subject_code': code.text.trim(), 'subject_title': title.text.trim(), 'section': section.text.trim(), 'teacher_id': supabase.auth.currentUser!.id});
+      await load();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Class could not be created: $error')));
+    }
   }
 
   @override
