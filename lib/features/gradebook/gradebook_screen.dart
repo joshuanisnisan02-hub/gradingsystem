@@ -17,6 +17,7 @@ class _GradebookScreenState extends State<GradebookScreen> {
   List<Map<String,dynamic>> enrollments=[], items=[];
   final Map<String,num?> scores={};
   String gradingPeriod='prelim';
+  String category='quiz';
   int gradingBase=30;
   Map<String,double> weights=Map.of(_defaultWeights);
   Timer? debounce;
@@ -28,15 +29,19 @@ class _GradebookScreenState extends State<GradebookScreen> {
     'attendance':10,
     'examination':40,
   };
+  static const Map<String,String> _periodLabels={'prelim':'Prelim','midterm':'Midterm','semifinal':'Semifinal','final':'Final'};
+  static const Map<String,String> _categoryLabels={'participation':'Participation','quiz':'Quizzes','assignment':'Assignments','attendance':'Attendance','examination':'Examination'};
 
   @override void initState(){super.initState();load();}
   Future<void> load() async {
+    if(mounted)setState(()=>loading=true);
     try {
       final roster=await supabase.from('class_enrollments').select('id, students(id, student_number, last_name, first_name)').eq('class_id',widget.classId).eq('status','active');
-      final assessments=await supabase.from('assessment_items').select().eq('class_id',widget.classId).eq('category','quiz').eq('archived',false).order('position');
+      final assessments=await supabase.from('assessment_items').select().eq('class_id',widget.classId).eq('grading_period',gradingPeriod).eq('category',category).eq('archived',false).order('position');
       final savedWeights=await supabase.from('grading_weights').select('category, weight').eq('class_id',widget.classId).eq('grading_period',gradingPeriod);
       final classSettings=await supabase.from('classes').select('grading_base').eq('id',widget.classId).single();
       final current=await supabase.from('scores').select('enrollment_id, assessment_item_id, raw_score').inFilter('assessment_item_id', List.from(assessments).map((e)=>e['id']).toList());
+      scores.clear();
       for(final row in current){scores['${row['enrollment_id']}:${row['assessment_item_id']}']=row['raw_score'];}
       final loaded=Map<String,double>.of(_defaultWeights);
       for(final row in savedWeights){loaded['${row['category']}']=(row['weight'] as num).toDouble();}
@@ -68,26 +73,42 @@ class _GradebookScreenState extends State<GradebookScreen> {
     } catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Percentages could not be saved: $e')));}
     finally{if(mounted)setState(()=>saving=false);}
   }
+  Future<void> addItem() async {
+    final result=await showDialog<_AssessmentItemResult>(context:context,builder:(_)=>_AddItemDialog(categoryLabel:_categoryLabels[category]!,suggestedNumber:items.length+1));
+    if(result==null)return;
+    setState(()=>saving=true);
+    try{
+      await supabase.from('assessment_items').insert({'class_id':widget.classId,'grading_period':gradingPeriod,'category':category,'title':result.title,'maximum_score':result.maximumScore,'position':items.length,'source':'manual'});
+      await load();
+      if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('${result.title} added to ${_categoryLabels[category]}.')));
+    }catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Item could not be added: $e')));}
+    finally{if(mounted)setState(()=>saving=false);}
+  }
   @override void dispose(){debounce?.cancel();super.dispose();}
 
   @override
   Widget build(BuildContext context) => WorkspaceShell(
-    title: 'Quiz Gradebook',
+    title: 'Class Gradebook',
     active: 'Gradebook',
-    actions: [OutlinedButton.icon(onPressed:saving?null:editWeights,icon:const Icon(Icons.tune_rounded,size:17),label:const Text('Grading percentages')),const SizedBox(width:10),Container(padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7), decoration: BoxDecoration(color: saving ? SmartGradeColors.mustardSoft : const Color(0xFFEAF4EC), borderRadius: BorderRadius.circular(18)), child: Row(children: [Icon(saving ? Icons.sync : Icons.cloud_done_outlined, size: 15, color: saving ? SmartGradeColors.black : const Color(0xFF347147)), const SizedBox(width: 6), Text(saving ? 'Saving…' : 'All changes saved', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700))]))],
+    actions: [FilledButton.icon(onPressed:saving?null:addItem,icon:const Icon(Icons.add,size:17),label:Text('Add ${_categoryLabels[category]!.replaceAll('Quizzes','quiz').replaceAll('Assignments','assignment')}')),const SizedBox(width:10),OutlinedButton.icon(onPressed:saving?null:editWeights,icon:const Icon(Icons.tune_rounded,size:17),label:const Text('Grading settings')),const SizedBox(width:10),Container(padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7), decoration: BoxDecoration(color: saving ? SmartGradeColors.mustardSoft : const Color(0xFFEAF4EC), borderRadius: BorderRadius.circular(18)), child: Row(children: [Icon(saving ? Icons.sync : Icons.cloud_done_outlined, size: 15, color: saving ? SmartGradeColors.black : const Color(0xFF347147)), const SizedBox(width: 6), Text(saving ? 'Saving…' : 'All changes saved', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700))]))],
     child: loading ? const Center(child: CircularProgressIndicator()) : Padding(
       padding: const EdgeInsets.all(24),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Wrap(runSpacing: 12, spacing: 12, crossAxisAlignment: WrapCrossAlignment.center, children: [
-          const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('GRADE ENTRY', style: TextStyle(fontSize: 9, letterSpacing: 1.4, color: SmartGradeColors.red, fontWeight: FontWeight.w800)), SizedBox(height: 5), Text('Prelim · Quizzes', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800))]),
+          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('GRADE ENTRY', style: TextStyle(fontSize: 9, letterSpacing: 1.4, color: SmartGradeColors.red, fontWeight: FontWeight.w800)),const SizedBox(height: 5),Text('${_periodLabels[gradingPeriod]} · ${_categoryLabels[category]}', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800))]),
           const SizedBox(width: 18),
           _Pill(icon: Icons.people_outline, text: '${enrollments.length} students'),
           _Pill(icon: Icons.assignment_outlined, text: '${items.length} activities'),
         ]),
+        const SizedBox(height:14),
+        Wrap(spacing:8,runSpacing:8,crossAxisAlignment:WrapCrossAlignment.center,children:[
+          SizedBox(width:150,child:DropdownButtonFormField<String>(initialValue:gradingPeriod,decoration:const InputDecoration(labelText:'Grading period',isDense:true),items:_periodLabels.entries.map((entry)=>DropdownMenuItem(value:entry.key,child:Text(entry.value))).toList(),onChanged:(value){if(value!=null&&value!=gradingPeriod){gradingPeriod=value;load();}})),
+          ..._categoryLabels.entries.map((entry)=>ChoiceChip(label:Text(entry.value),selected:category==entry.key,onSelected:(_){if(category!=entry.key){category=entry.key;load();}})),
+        ]),
         const SizedBox(height: 19),
         Container(padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10), decoration: BoxDecoration(color: Colors.white, border: Border.all(color: SmartGradeColors.line), borderRadius: BorderRadius.circular(9)), child: const Row(children: [Icon(Icons.info_outline_rounded, color: SmartGradeColors.mustard, size: 19), SizedBox(width: 9), Expanded(child: Text('Enter a score, then press Enter. Changes save automatically.', style: TextStyle(fontSize: 11, color: SmartGradeColors.muted))), Icon(Icons.keyboard_alt_outlined, size: 18, color: SmartGradeColors.muted)])),
         const SizedBox(height: 14),
-        Expanded(child: items.isEmpty ? const _NoItems() : Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Expanded(child: items.isEmpty ? _NoItems(categoryLabel:_categoryLabels[category]!,onAdd:addItem) : Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Expanded(child: Container(decoration: BoxDecoration(color: Colors.white, border: Border.all(color: SmartGradeColors.line), borderRadius: BorderRadius.circular(9)), clipBehavior: Clip.antiAlias, child: SingleChildScrollView(scrollDirection: Axis.horizontal, child: SingleChildScrollView(child: Theme(data: Theme.of(context).copyWith(dividerColor: SmartGradeColors.line), child: DataTable(
             headingRowColor: WidgetStateProperty.all(const Color(0xFFF0EEEB)),
             dataRowMinHeight: 60,
@@ -117,6 +138,26 @@ class _GradingSettingsResult {
   const _GradingSettingsResult({required this.weights,required this.base});
   final Map<String,double> weights;
   final int base;
+}
+
+class _AssessmentItemResult {
+  const _AssessmentItemResult({required this.title,required this.maximumScore});
+  final String title;
+  final double maximumScore;
+}
+
+class _AddItemDialog extends StatefulWidget {
+  const _AddItemDialog({required this.categoryLabel,required this.suggestedNumber});
+  final String categoryLabel;
+  final int suggestedNumber;
+  @override State<_AddItemDialog> createState()=>_AddItemDialogState();
+}
+
+class _AddItemDialogState extends State<_AddItemDialog>{
+  late final title=TextEditingController(text:'${widget.categoryLabel.replaceAll('Quizzes','Quiz').replaceAll('Assignments','Assignment')} ${widget.suggestedNumber}');
+  final maximum=TextEditingController(text:'100');
+  @override void dispose(){title.dispose();maximum.dispose();super.dispose();}
+  @override Widget build(BuildContext context)=>AlertDialog(title:Text('Add ${widget.categoryLabel} item'),content:SizedBox(width:400,child:Column(mainAxisSize:MainAxisSize.min,children:[TextField(controller:title,autofocus:true,decoration:const InputDecoration(labelText:'Item name')),const SizedBox(height:12),TextField(controller:maximum,keyboardType:const TextInputType.numberWithOptions(decimal:true),decoration:const InputDecoration(labelText:'Highest possible score'))])),actions:[TextButton(onPressed:()=>Navigator.pop(context),child:const Text('Cancel')),FilledButton(onPressed:(){final name=title.text.trim();final max=double.tryParse(maximum.text.trim());if(name.isEmpty||max==null||max<=0){ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Enter an item name and a valid highest score.')));return;}Navigator.pop(context,_AssessmentItemResult(title:name,maximumScore:max));},child:const Text('Add item'))]);
 }
 
 class _WeightDialog extends StatefulWidget {
@@ -172,6 +213,8 @@ class _Insight extends StatelessWidget {
 }
 
 class _NoItems extends StatelessWidget {
-  const _NoItems();
-  @override Widget build(BuildContext context) => Container(width: double.infinity, decoration: BoxDecoration(color: Colors.white, border: Border.all(color: SmartGradeColors.line), borderRadius: BorderRadius.circular(9)), child: const Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.assignment_outlined, size: 43, color: SmartGradeColors.red), SizedBox(height: 12), Text('No quiz items yet', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17)), SizedBox(height: 5), Text('Create assessment items in Supabase to begin entering scores.', style: TextStyle(color: SmartGradeColors.muted))]));
+  const _NoItems({required this.categoryLabel,required this.onAdd});
+  final String categoryLabel;
+  final VoidCallback onAdd;
+  @override Widget build(BuildContext context) => Container(width: double.infinity, decoration: BoxDecoration(color: Colors.white, border: Border.all(color: SmartGradeColors.line), borderRadius: BorderRadius.circular(9)), child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [const Icon(Icons.assignment_outlined, size: 43, color: SmartGradeColors.red),const SizedBox(height: 12),Text('No $categoryLabel items yet', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),const SizedBox(height: 5),const Text('Add the first item, then enter each student’s score.', style: TextStyle(color: SmartGradeColors.muted)),const SizedBox(height:16),FilledButton.icon(onPressed:onAdd,icon:const Icon(Icons.add),label:const Text('Add first item'))]));
 }
