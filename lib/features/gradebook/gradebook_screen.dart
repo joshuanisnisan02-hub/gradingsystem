@@ -168,8 +168,10 @@ class _GradebookScreenState extends State<GradebookScreen> {
         Container(padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10), decoration: BoxDecoration(color: Colors.white, border: Border.all(color: SmartGradeColors.line), borderRadius: BorderRadius.circular(9)), child: const Row(children: [Icon(Icons.info_outline_rounded, color: SmartGradeColors.mustard, size: 19), SizedBox(width: 9), Expanded(child: Text('Enter a score, then press Enter. Changes save automatically.', style: TextStyle(fontSize: 11, color: SmartGradeColors.muted))), Icon(Icons.keyboard_alt_outlined, size: 18, color: SmartGradeColors.muted)])),
         const SizedBox(height: 14),
         Expanded(child: category=='overall' ? _buildOverallRecord() : items.isEmpty ? _NoItems(categoryLabel:_categoryLabels[category]!,onAdd:addItem) : Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Expanded(child: Container(decoration: BoxDecoration(color: Colors.white, border: Border.all(color: SmartGradeColors.line), borderRadius: BorderRadius.circular(9)), clipBehavior: Clip.antiAlias, child: SingleChildScrollView(scrollDirection: Axis.horizontal, child: SingleChildScrollView(child: Theme(data: Theme.of(context).copyWith(dividerColor: SmartGradeColors.line), child: DataTable(
+          Expanded(child: Container(decoration: BoxDecoration(color: Colors.white, border: Border.all(color: SmartGradeColors.line), borderRadius: BorderRadius.circular(9)), clipBehavior: Clip.antiAlias, child: LayoutBuilder(builder:(context,constraints)=>SingleChildScrollView(scrollDirection: Axis.horizontal, child: ConstrainedBox(constraints:BoxConstraints(minWidth:constraints.maxWidth),child:SingleChildScrollView(child: Theme(data: Theme.of(context).copyWith(dividerColor: SmartGradeColors.line), child: DataTable(
             headingRowColor: WidgetStateProperty.all(const Color(0xFFF0EEEB)),
+            horizontalMargin:16,
+            columnSpacing:items.length>=6?18:32,
             dataRowMinHeight: 60,
             dataRowMaxHeight: 60,
             columns: [const DataColumn(label: SizedBox(width: 210, child: Text('STUDENT', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: .7)))), ...items.map((item) => DataColumn(label: Text('${item['title']}\nMAX ${item['maximum_score']}', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700)))), const DataColumn(label: Text('TOTAL')), const DataColumn(label: Text('AVERAGE'))],
@@ -185,7 +187,7 @@ class _GradebookScreenState extends State<GradebookScreen> {
                 DataCell(Container(padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5), decoration: BoxDecoration(color: average < 75 ? const Color(0xFFFFE8E8) : const Color(0xFFEAF4EC), borderRadius: BorderRadius.circular(12)), child: Text('${average.toStringAsFixed(1)}%', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: average < 75 ? SmartGradeColors.red : const Color(0xFF347147))))),
               ]);
             }).toList(),
-          )))))),
+          ))))))),
           if (MediaQuery.sizeOf(context).width >= 1180) ...[const SizedBox(width: 14), const SizedBox(width: 245, child: _Insights())],
         ])),
       ]),
@@ -194,8 +196,8 @@ class _GradebookScreenState extends State<GradebookScreen> {
 
   Widget _buildOverallRecord(){
     if(items.isEmpty)return const _OverallEmpty();
-    return Container(decoration:BoxDecoration(color:Colors.white,border:Border.all(color:SmartGradeColors.line),borderRadius:BorderRadius.circular(9)),clipBehavior:Clip.antiAlias,child:SingleChildScrollView(scrollDirection:Axis.horizontal,child:SingleChildScrollView(child:DataTable(
-      headingRowColor:WidgetStateProperty.all(const Color(0xFFF0EEEB)),dataRowMinHeight:60,dataRowMaxHeight:60,
+    return Container(decoration:BoxDecoration(color:Colors.white,border:Border.all(color:SmartGradeColors.line),borderRadius:BorderRadius.circular(9)),clipBehavior:Clip.antiAlias,child:LayoutBuilder(builder:(context,constraints)=>SingleChildScrollView(scrollDirection:Axis.horizontal,child:ConstrainedBox(constraints:BoxConstraints(minWidth:constraints.maxWidth),child:SingleChildScrollView(child:DataTable(
+      headingRowColor:WidgetStateProperty.all(const Color(0xFFF0EEEB)),horizontalMargin:16,columnSpacing:24,dataRowMinHeight:60,dataRowMaxHeight:60,
       columns:[const DataColumn(label:SizedBox(width:210,child:Text('STUDENT',style:TextStyle(fontSize:10,fontWeight:FontWeight.w800)))),..._scoreCategories.map((key)=>DataColumn(label:Text('${_categoryLabels[key]!.toUpperCase()}\n${weights[key]?.toStringAsFixed(0)??'0'}%',style:const TextStyle(fontSize:10,fontWeight:FontWeight.w700)))),const DataColumn(label:Text('PERIOD GRADE')),const DataColumn(label:Text('REMARKS'))],
       rows:enrollments.map((enrollment){
         final categoryGrades=<String,double>{};
@@ -204,7 +206,7 @@ class _GradebookScreenState extends State<GradebookScreen> {
         final student=enrollment['students'];
         return DataRow(cells:[DataCell(SizedBox(width:210,child:Column(mainAxisAlignment:MainAxisAlignment.center,crossAxisAlignment:CrossAxisAlignment.start,children:[Text('${student['last_name']}, ${student['first_name']}',overflow:TextOverflow.ellipsis,style:const TextStyle(fontWeight:FontWeight.w700,fontSize:12)),Text('${student['student_number']}',style:const TextStyle(color:SmartGradeColors.muted,fontSize:10))]))),..._scoreCategories.map((key)=>DataCell(Text(categoryGrades[key]!.toStringAsFixed(1),style:const TextStyle(fontWeight:FontWeight.w700)))),DataCell(Text(periodGrade.toStringAsFixed(2),style:const TextStyle(fontWeight:FontWeight.w900))),DataCell(Text(periodGrade>=75?'PASSED':'FAILED',style:TextStyle(fontWeight:FontWeight.w800,color:periodGrade>=75?const Color(0xFF347147):SmartGradeColors.red)))]);
       }).toList(),
-    ))));
+    ))))));
   }
 }
 
