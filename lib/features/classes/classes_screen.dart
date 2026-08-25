@@ -120,9 +120,7 @@ class _ClassesScreenState extends State<ClassesScreen> {
       }else if(extension=='pdf'){
         final document=await PdfDocument.openData(bytes,sourceName:file.name);
         try{
-          final text=StringBuffer();
-          for(final page in document.pages){final pageText=await page.loadText();if(pageText!=null)text.writeln(pageText.fullText);}
-          detected=InstructorLoadParser.parsePdfText(text.toString());
+          detected=await _parseInstructorLoadPdf(document);
         }finally{await document.dispose();}
       }else if(extension=='rpt'){
         detected=InstructorLoadParser.parseRptBytes(bytes);
@@ -142,6 +140,56 @@ class _ClassesScreenState extends State<ClassesScreen> {
     }catch(error){
       if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Instructor load could not be imported: $error'),duration:const Duration(seconds:8)));
     }finally{if(mounted)setState(()=>importingLoad=false);}
+  }
+
+  Future<List<InstructorLoadClass>> _parseInstructorLoadPdf(PdfDocument document) async {
+    final detected=<InstructorLoadClass>[];
+    final plainText=StringBuffer();
+    final timePattern=RegExp(r'^\d{1,2}:\d{2}:\d{2}\s+[AP]M\s*-',caseSensitive:false);
+    for(final page in document.pages){
+      final raw=await page.loadText();
+      if(raw!=null)plainText.writeln(raw.fullText);
+      final pageText=await page.loadStructuredText();
+      final fragments=pageText.fragments.where((fragment)=>fragment.text.trim().isNotEmpty).toList();
+      PdfPageTextFragment? header(String pattern){
+        for(final fragment in fragments){if(fragment.text.toLowerCase().contains(pattern))return fragment;}
+        return null;
+      }
+      final codeHeader=header('course no');
+      final titleHeader=header('descriptive title');
+      final unitsHeader=header('units');
+      final sectionHeader=header('section');
+      final roomHeader=header('room');
+      if(codeHeader==null||titleHeader==null||unitsHeader==null||sectionHeader==null)continue;
+      final timeRows=fragments.where((fragment)=>timePattern.hasMatch(fragment.text.trim())).toList()
+        ..sort((a,b)=>b.bounds.top.compareTo(a.bounds.top));
+      String columnText(double rowY,double left,double right,{double tolerance=3}){
+        final cells=fragments.where((fragment)=>(fragment.bounds.top-rowY).abs()<=tolerance&&fragment.bounds.left>=left-3&&fragment.bounds.left<right-3).toList()
+          ..sort((a,b)=>a.bounds.left.compareTo(b.bounds.left));
+        return cells.map((cell)=>cell.text.trim()).where((text)=>text.isNotEmpty).join(' ').replaceAll(RegExp(r'\s+'),' ').trim();
+      }
+      for(var index=0;index<timeRows.length;index++){
+        final row=timeRows[index];
+        final rowY=row.bounds.top;
+        final nextY=index+1<timeRows.length?timeRows[index+1].bounds.top:double.negativeInfinity;
+        final code=columnText(rowY,codeHeader.bounds.left,titleHeader.bounds.left);
+        var title=columnText(rowY,titleHeader.bounds.left,unitsHeader.bounds.left);
+        final sectionRight=roomHeader?.bounds.left??page.width;
+        var section=columnText(rowY,sectionHeader.bounds.left,sectionRight);
+        section=section.replaceFirst(RegExp(r'\s+Regular$',caseSensitive:false),'').trim();
+        final continuations=fragments.where((fragment)=>fragment.bounds.top<rowY-3&&fragment.bounds.top>nextY+3&&fragment.bounds.left>=titleHeader.bounds.left-3&&fragment.bounds.left<unitsHeader.bounds.left-3).toList()
+          ..sort((a,b){final vertical=b.bounds.top.compareTo(a.bounds.top);return vertical!=0?vertical:a.bounds.left.compareTo(b.bounds.left);});
+        if(continuations.isNotEmpty){title='$title ${continuations.map((cell)=>cell.text.trim()).join(' ')}'.replaceAll(RegExp(r'\s+'),' ').trim();}
+        if(code.isNotEmpty&&title.isNotEmpty&&section.isNotEmpty)detected.add(InstructorLoadClass(subjectCode:code,subjectTitle:title,section:section));
+      }
+    }
+    final unique={for(final item in detected)item.key:item}.values.toList();
+    try{
+      final fallback=InstructorLoadParser.parsePdfText(plainText.toString());
+      if(fallback.length>unique.length)return fallback;
+    }catch(_){/* The coordinate-based table reader remains the primary result. */}
+    if(unique.isEmpty)throw const FormatException('No teaching-load rows were detected in this PDF.');
+    return unique;
   }
 
   Future<_MasterlistFile?> _pickStudentMasterlist() async {
