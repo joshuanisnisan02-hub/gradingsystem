@@ -1,0 +1,25 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "SmartGrade Web",
+      "request": "launch",
+      "type": "dart",
+      "deviceId": "chrome",
+      "toolArgs": [
+        "--dart-define=SUPABASE_URL=https://buwqtthzzrgbmpieakay.supabase.co",
+        "--dart-define=SUPABASE_PUBLISHABLE_KEY=sb_publishable_3rjcoooXdoEBpN_ingWzfA_R9j-Od2T"
+      ]
+    },
+    {
+      "name": "SmartGrade Windows",
+      "request": "launch",
+      "type": "dart",
+      "deviceId": "windows",
+      "toolArgs": [
+        "--dart-define=SUPABASE_URL=https://buwqtthzzrgbmpieakay.supabase.co",
+        "--dart-define=SUPABASE_PUBLISHABLE_KEY=sb_publishable_3rjcoooXdoEBpN_ingWzfA_R9j-Od2T"
+      ]
+    }
+  ]
+}

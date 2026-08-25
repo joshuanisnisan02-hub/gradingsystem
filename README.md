@@ -2,6 +2,8 @@
 
 SmartGrade is a responsive Flutter + Supabase teacher grading and class-record system. This repository now contains the Phase 1 foundation: Supabase email/password authentication, per-teacher classes, per-class rosters, quiz assessment items, spreadsheet-style score entry, debounced upserts, transparent grade calculations, PostgreSQL migrations, RLS policies, an Edge Function boundary for Google Classroom, tests, and CI.
 
+Connected Supabase project: `grading-system` (`buwqtthzzrgbmpieakay`). The checked-in key is a frontend-safe publishable key; no secret or service-role key is stored in the application.
+
 ## Current phase
 
 Implemented:
@@ -59,6 +61,8 @@ Next:
    ```
 
 For Windows, replace `-d chrome` with `-d windows`.
+
+In VS Code, you can also open **Run and Debug** and select **SmartGrade Web** or **SmartGrade Windows**. These launch profiles already contain the project's public Supabase URL and publishable key.
 
 ## Security
 
