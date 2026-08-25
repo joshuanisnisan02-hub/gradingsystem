@@ -16,7 +16,7 @@ class ExamCsvData {
 
 class ExamCsvParser {
   static ExamCsvData parse(String source) {
-    final records = const CsvToListConverter(shouldParseNumbers: false).convert(source.replaceAll('\r\n', '\n'));
+    final records = const CsvToListConverter(shouldParseNumbers: false, eol: '\n').convert(source.replaceAll('\r\n', '\n').replaceAll('\r', '\n'));
     if (records.length < 2) throw const FormatException('The CSV must contain a header and at least one student.');
     final headers = records.first.map((value) => '$value'.trim().toLowerCase()).toList();
     int column(String name) => headers.indexOf(name);
