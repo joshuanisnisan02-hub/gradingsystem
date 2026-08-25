@@ -109,12 +109,12 @@ class _RailButton extends StatelessWidget {
 }
 
 class _NavItem extends StatelessWidget {
-  const _NavItem({required this.label, required this.icon, required this.active, required this.onTap, this.badge});
-  final String label; final IconData icon; final bool active; final VoidCallback onTap; final String? badge;
+  const _NavItem({required this.label, required this.icon, required this.active, required this.onTap});
+  final String label; final IconData icon; final bool active; final VoidCallback onTap;
   @override Widget build(BuildContext context) => Container(
     margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
     decoration: BoxDecoration(color: active ? SmartGradeColors.red : Colors.transparent, borderRadius: BorderRadius.circular(7)),
-    child: ListTile(dense: true, minLeadingWidth: 20, leading: Icon(icon, size: 18, color: active ? Colors.white : Colors.white60), title: Text(label, style: TextStyle(color: active ? Colors.white : Colors.white70, fontSize: 12, fontWeight: active ? FontWeight.w700 : FontWeight.w500)), trailing: badge == null ? null : Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2), decoration: BoxDecoration(color: SmartGradeColors.mustard, borderRadius: BorderRadius.circular(10)), child: Text(badge!, style: const TextStyle(fontSize: 9, color: SmartGradeColors.black, fontWeight: FontWeight.bold))), onTap: onTap),
+    child: ListTile(dense: true, minLeadingWidth: 20, leading: Icon(icon, size: 18, color: active ? Colors.white : Colors.white60), title: Text(label, style: TextStyle(color: active ? Colors.white : Colors.white70, fontSize: 12, fontWeight: active ? FontWeight.w700 : FontWeight.w500)), onTap: onTap),
   );
 }
 
