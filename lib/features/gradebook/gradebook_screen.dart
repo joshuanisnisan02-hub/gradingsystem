@@ -17,6 +17,7 @@ class _GradebookScreenState extends State<GradebookScreen> {
   List<Map<String,dynamic>> enrollments=[], items=[];
   final Map<String,num?> scores={};
   String gradingPeriod='prelim';
+  int gradingBase=30;
   Map<String,double> weights=Map.of(_defaultWeights);
   Timer? debounce;
 
@@ -34,11 +35,12 @@ class _GradebookScreenState extends State<GradebookScreen> {
       final roster=await supabase.from('class_enrollments').select('id, students(id, student_number, last_name, first_name)').eq('class_id',widget.classId).eq('status','active');
       final assessments=await supabase.from('assessment_items').select().eq('class_id',widget.classId).eq('category','quiz').eq('archived',false).order('position');
       final savedWeights=await supabase.from('grading_weights').select('category, weight').eq('class_id',widget.classId).eq('grading_period',gradingPeriod);
+      final classSettings=await supabase.from('classes').select('grading_base').eq('id',widget.classId).single();
       final current=await supabase.from('scores').select('enrollment_id, assessment_item_id, raw_score').inFilter('assessment_item_id', List.from(assessments).map((e)=>e['id']).toList());
       for(final row in current){scores['${row['enrollment_id']}:${row['assessment_item_id']}']=row['raw_score'];}
       final loaded=Map<String,double>.of(_defaultWeights);
       for(final row in savedWeights){loaded['${row['category']}']=(row['weight'] as num).toDouble();}
-      setState((){enrollments=List.from(roster);items=List.from(assessments);weights=loaded;loading=false;});
+      setState((){enrollments=List.from(roster);items=List.from(assessments);weights=loaded;gradingBase=(classSettings['grading_base'] as num?)?.toInt()??30;loading=false;});
     } catch(e){if(mounted){setState(()=>loading=false);ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Gradebook could not be loaded: $e')));}}
   }
   void changeScore(String enrollmentId,String itemId,num? value,num maximum){
@@ -47,12 +49,12 @@ class _GradebookScreenState extends State<GradebookScreen> {
   }
   Future<void> save(String enrollmentId,String itemId,num? value) async {await supabase.from('scores').upsert({'enrollment_id':enrollmentId,'assessment_item_id':itemId,'raw_score':value,'status':value==null?'missing':'scored','updated_by':supabase.auth.currentUser!.id},onConflict:'enrollment_id,assessment_item_id');if(mounted)setState(()=>saving=false);}
   Future<void> editWeights() async {
-    final updated=await showDialog<Map<String,double>>(context: context,builder: (_)=>_WeightDialog(initial: weights));
+    final updated=await showDialog<_GradingSettingsResult>(context: context,builder: (_)=>_WeightDialog(initial: weights,initialBase:gradingBase));
     if(updated==null)return;
     setState(()=>saving=true);
     try {
       await supabase.from('grading_weights').upsert(
-        updated.entries.map((entry)=>{
+        updated.weights.entries.map((entry)=>{
           'class_id':widget.classId,
           'grading_period':gradingPeriod,
           'category':entry.key,
@@ -61,7 +63,8 @@ class _GradebookScreenState extends State<GradebookScreen> {
         }).toList(),
         onConflict:'class_id,grading_period,category',
       );
-      if(mounted){setState(()=>weights=updated);ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Grading percentages saved.')));}
+      await supabase.from('classes').update({'grading_base':updated.base,'updated_at':DateTime.now().toUtc().toIso8601String()}).eq('id',widget.classId);
+      if(mounted){setState((){weights=updated.weights;gradingBase=updated.base;});ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Grading settings saved: ${updated.base==0?'Board course · Base 0':'Non-board course · Base 30'}.')));}
     } catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Percentages could not be saved: $e')));}
     finally{if(mounted)setState(()=>saving=false);}
   }
@@ -94,7 +97,7 @@ class _GradebookScreenState extends State<GradebookScreen> {
               final student = enrollment['students'];
               final earned = items.fold<double>(0, (sum, item) => sum + (scores['${enrollment['id']}:${item['id']}'] ?? 0).toDouble());
               final possible = items.fold<double>(0, (sum, item) => sum + (item['maximum_score'] as num).toDouble());
-              final average = GradeCalculator.percentage(earned, possible);
+              final average = GradeCalculator.transmutedPercentage(earned, possible,base:gradingBase);
               return DataRow(cells: [
                 DataCell(SizedBox(width: 210, child: Row(children: [CircleAvatar(radius: 15, backgroundColor: SmartGradeColors.mustardSoft, foregroundColor: SmartGradeColors.black, child: Text('${student['first_name']}'.isEmpty ? '?' : '${student['first_name']}'.substring(0, 1), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 11))), const SizedBox(width: 10), Expanded(child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [Text('${student['last_name']}, ${student['first_name']}', overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12)), Text('${student['student_number']}', style: const TextStyle(color: SmartGradeColors.muted, fontSize: 10))]))]))),
                 ...items.map((item) { final key = '${enrollment['id']}:${item['id']}'; return DataCell(SizedBox(width: 72, child: TextFormField(key: ValueKey('$key:${scores[key]}'), initialValue: scores[key]?.toString() ?? '', textAlign: TextAlign.center, keyboardType: TextInputType.number, onFieldSubmitted: (value) => changeScore(enrollment['id'], item['id'], num.tryParse(value), item['maximum_score']), decoration: const InputDecoration(isDense: true, contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 9))))); }),
@@ -110,13 +113,21 @@ class _GradebookScreenState extends State<GradebookScreen> {
   );
 }
 
+class _GradingSettingsResult {
+  const _GradingSettingsResult({required this.weights,required this.base});
+  final Map<String,double> weights;
+  final int base;
+}
+
 class _WeightDialog extends StatefulWidget {
-  const _WeightDialog({required this.initial});
+  const _WeightDialog({required this.initial,required this.initialBase});
   final Map<String,double> initial;
+  final int initialBase;
   @override State<_WeightDialog> createState()=>_WeightDialogState();
 }
 
 class _WeightDialogState extends State<_WeightDialog> {
+  late int gradingBase=widget.initialBase;
   late final Map<String,TextEditingController> controllers={
     for(final entry in widget.initial.entries) entry.key:TextEditingController(text:entry.value.toStringAsFixed(entry.value%1==0?0:2)),
   };
@@ -131,12 +142,14 @@ class _WeightDialogState extends State<_WeightDialog> {
     return AlertDialog(
       title:const Text('Grading percentages'),
       content:SizedBox(width:430,child:SingleChildScrollView(child:Column(mainAxisSize:MainAxisSize.min,crossAxisAlignment:CrossAxisAlignment.start,children:[
-        const Text('Set the percentage for each category. These settings apply to the selected class and grading period.',style:TextStyle(color:SmartGradeColors.muted,fontSize:12)),
+        const Text('Set the course basis and percentage for each category. These settings apply to the selected class.',style:TextStyle(color:SmartGradeColors.muted,fontSize:12)),
+        const SizedBox(height:16),
+        DropdownButtonFormField<int>(value:gradingBase,decoration:const InputDecoration(labelText:'Course grading basis'),items:const [DropdownMenuItem(value:0,child:Text('Board course — Base 0')),DropdownMenuItem(value:30,child:Text('Non-board course — Base 30'))],onChanged:(value)=>setState(()=>gradingBase=value??30)),
         const SizedBox(height:16),
         ...controllers.entries.map((entry)=>Padding(padding:const EdgeInsets.only(bottom:10),child:TextField(controller:entry.value,keyboardType:const TextInputType.numberWithOptions(decimal:true),onChanged:(_)=>setState((){}),decoration:InputDecoration(labelText:labels[entry.key],suffixText:'%',helperText:entry.key=='examination'?'Workbook default: 40%':null)))),
         Container(padding:const EdgeInsets.all(12),decoration:BoxDecoration(color:valid?const Color(0xFFEAF4EC):const Color(0xFFFFE8E8),borderRadius:BorderRadius.circular(8)),child:Row(children:[Icon(valid?Icons.check_circle_outline:Icons.error_outline,color:valid?const Color(0xFF347147):SmartGradeColors.red),const SizedBox(width:9),Expanded(child:Text('Total: ${total.toStringAsFixed(total%1==0?0:2)}%${valid?' — Ready to save':' — Must equal 100%'}',style:TextStyle(fontWeight:FontWeight.w800,color:valid?const Color(0xFF347147):SmartGradeColors.red)))])),
       ]))),
-      actions:[TextButton(onPressed:()=>Navigator.pop(context),child:const Text('Cancel')),FilledButton(onPressed:valid?()=>Navigator.pop(context,values):null,child:const Text('Save percentages'))],
+      actions:[TextButton(onPressed:()=>Navigator.pop(context),child:const Text('Cancel')),FilledButton(onPressed:valid?()=>Navigator.pop(context,_GradingSettingsResult(weights:values,base:gradingBase)):null,child:const Text('Save settings'))],
     );
   }
 }
