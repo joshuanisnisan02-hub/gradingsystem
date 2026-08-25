@@ -83,9 +83,9 @@ class _Navigation extends StatelessWidget {
       _NavItem(label: 'Imports & Sync', icon: Icons.sync_rounded, badge: '2', active: active == 'Imports', onTap: () {}),
       _NavItem(label: 'Reports', icon: Icons.description_outlined, active: active == 'Reports', onTap: () {}),
       const Padding(padding: EdgeInsets.fromLTRB(20, 24, 20, 10), child: Text('QUICK FILTERS', style: TextStyle(color: Colors.white38, fontSize: 9, fontWeight: FontWeight.w700, letterSpacing: 1.2))),
-      _Filter(label: 'Active classes', color: SmartGradeColors.red),
-      _Filter(label: 'Missing scores', color: SmartGradeColors.mustard),
-      _Filter(label: 'At-risk students', color: Colors.white54),
+      const _Filter(label: 'Active classes', color: SmartGradeColors.red),
+      const _Filter(label: 'Missing scores', color: SmartGradeColors.mustard),
+      const _Filter(label: 'At-risk students', color: Colors.white54),
       const Spacer(),
       Padding(padding: const EdgeInsets.all(16), child: OutlinedButton.icon(
         style: OutlinedButton.styleFrom(foregroundColor: Colors.white70, side: const BorderSide(color: Colors.white24), minimumSize: const Size.fromHeight(42)),

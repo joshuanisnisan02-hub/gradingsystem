@@ -126,7 +126,7 @@ class _Metric extends StatelessWidget {
   final Color color;
   @override
   Widget build(BuildContext context) => Container(width: 220, padding: const EdgeInsets.all(17), decoration: BoxDecoration(color: Colors.white, border: Border.all(color: SmartGradeColors.line), borderRadius: BorderRadius.circular(9)), child: Row(children: [
-    Container(width: 42, height: 42, decoration: BoxDecoration(color: color.withOpacity(.12), borderRadius: BorderRadius.circular(8)), child: Icon(icon, color: color, size: 21)),
+    Container(width: 42, height: 42, decoration: BoxDecoration(color: color.withValues(alpha: .12), borderRadius: BorderRadius.circular(8)), child: Icon(icon, color: color, size: 21)),
     const SizedBox(width: 13),
     Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(value, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800)), Text(label, style: const TextStyle(fontSize: 9, letterSpacing: .8, color: SmartGradeColors.muted, fontWeight: FontWeight.w700))]),
   ]));

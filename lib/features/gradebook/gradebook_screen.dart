@@ -54,7 +54,7 @@ class _GradebookScreenState extends State<GradebookScreen> {
         const SizedBox(height: 14),
         Expanded(child: items.isEmpty ? const _NoItems() : Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Expanded(child: Container(decoration: BoxDecoration(color: Colors.white, border: Border.all(color: SmartGradeColors.line), borderRadius: BorderRadius.circular(9)), clipBehavior: Clip.antiAlias, child: SingleChildScrollView(scrollDirection: Axis.horizontal, child: SingleChildScrollView(child: Theme(data: Theme.of(context).copyWith(dividerColor: SmartGradeColors.line), child: DataTable(
-            headingRowColor: MaterialStateProperty.all(const Color(0xFFF0EEEB)),
+            headingRowColor: WidgetStateProperty.all(const Color(0xFFF0EEEB)),
             dataRowMinHeight: 60,
             dataRowMaxHeight: 60,
             columns: [const DataColumn(label: SizedBox(width: 210, child: Text('STUDENT', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: .7)))), ...items.map((item) => DataColumn(label: Text('${item['title']}\nMAX ${item['maximum_score']}', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700)))), const DataColumn(label: Text('TOTAL')), const DataColumn(label: Text('AVERAGE'))],
