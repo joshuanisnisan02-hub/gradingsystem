@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'features/auth/login_screen.dart';
 import 'features/classes/classes_screen.dart';
 import 'features/gradebook/gradebook_screen.dart';
+import 'core/design_system.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -44,12 +45,7 @@ class SmartGradeApp extends ConsumerWidget {
     return MaterialApp.router(
       title: 'SmartGrade',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF14213D), primary: const Color(0xFF14213D), secondary: const Color(0xFFF97316)),
-        scaffoldBackgroundColor: const Color(0xFFF5F7FA),
-        useMaterial3: true,
-        inputDecorationTheme: const InputDecorationTheme(border: OutlineInputBorder()),
-      ),
+      theme: smartGradeTheme(),
       routerConfig: ref.watch(routerProvider),
     );
   }
