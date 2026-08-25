@@ -108,9 +108,10 @@ class _ClassesScreenState extends State<ClassesScreen> {
     final file = result.files.single;
     final bytes = file.bytes;
     if (bytes == null) throw const FormatException('The selected CSV could not be read.');
-    final text = utf8.decode(bytes, allowMalformed: true);
-    final rows = const CsvToListConverter(shouldParseNumbers: false).convert(text);
-    if (rows.length < 2) throw const FormatException('The CSV must contain a header and at least one student.');
+    final text = utf8.decode(bytes, allowMalformed: true).replaceAll('\r\n', '\n').replaceAll('\r', '\n').trim();
+    if (text.isEmpty) throw const FormatException('The selected CSV is empty.');
+    final rows = const CsvToListConverter(eol: '\n', shouldParseNumbers: false).convert(text);
+    if (rows.length < 2) throw FormatException('Only ${rows.length} CSV row was detected. Please select the exported school masterlist CSV, not the Excel class record.');
     final headers = rows.first.map((cell) => '$cell'.replaceFirst('\ufeff', '').trim().toLowerCase().replaceAll(' ', '_')).toList();
     int column(List<String> names) => headers.indexWhere(names.contains);
     final numberColumn = column(const ['student_number', 'student_no', 'student_id', 'id_number']);
