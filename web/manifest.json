@@ -1,0 +1,11 @@
+{
+  "name": "SmartGrade",
+  "short_name": "SmartGrade",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#F5F7FA",
+  "theme_color": "#14213D",
+  "description": "Teacher grading and class record system",
+  "orientation": "portrait-primary",
+  "prefer_related_applications": false
+}
