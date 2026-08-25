@@ -62,13 +62,16 @@ class _ClassesScreenState extends State<ClassesScreen> {
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             const Text('STUDENT MASTERLIST (OPTIONAL)', style: TextStyle(fontSize: 10, letterSpacing: 1, fontWeight: FontWeight.w800)),
             const SizedBox(height: 6),
-            const Text('CSV columns: student_number, last_name, first_name. Email, course, and year_level are optional.', style: TextStyle(fontSize: 11, height: 1.4, color: SmartGradeColors.muted)),
+            const Text('Accepts the school CSV format: Student ID, Name, Course, Year Level. Separate name columns are also supported.', style: TextStyle(fontSize: 11, height: 1.4, color: SmartGradeColors.muted)),
             const SizedBox(height: 11),
             OutlinedButton.icon(
               onPressed: () async {
                 try {
                   final result = await _pickStudentMasterlist();
                   if (result == null) return;
+                  final parts = result.name.replaceFirst(RegExp(r'\.csv$', caseSensitive: false), '').split(' - ');
+                  if (section.text.trim().isEmpty && parts.isNotEmpty) section.text = parts.first.trim();
+                  if (code.text.trim().isEmpty && parts.length > 1) code.text = parts.last.trim();
                   setDialogState(() { selectedFile = result.name; importedStudents = result.students; importError = null; });
                 } catch (error) {
                   setDialogState(() { selectedFile = null; importedStudents = []; importError = '$error'; });
@@ -113,17 +116,32 @@ class _ClassesScreenState extends State<ClassesScreen> {
     final numberColumn = column(const ['student_number', 'student_no', 'student_id', 'id_number']);
     final lastColumn = column(const ['last_name', 'lastname', 'surname']);
     final firstColumn = column(const ['first_name', 'firstname', 'given_name']);
+    final nameColumn = column(const ['name', 'student_name', 'learner_name', 'learners_name']);
     final emailColumn = column(const ['email', 'email_address']);
     final courseColumn = column(const ['course', 'program']);
     final yearColumn = column(const ['year_level', 'year']);
-    if (numberColumn < 0 || lastColumn < 0 || firstColumn < 0) throw const FormatException('Required columns: student_number, last_name, first_name.');
+    if (numberColumn < 0 || ((lastColumn < 0 || firstColumn < 0) && nameColumn < 0)) throw const FormatException('Use either Student ID + Name, or student_number + last_name + first_name.');
     String value(List<dynamic> row, int index) => index >= 0 && index < row.length ? '${row[index]}'.trim() : '';
     final students = <Map<String, dynamic>>[];
     final seen = <String>{};
     for (final row in rows.skip(1)) {
       final number = value(row, numberColumn);
-      final lastName = value(row, lastColumn);
-      final firstName = value(row, firstColumn);
+      var lastName = value(row, lastColumn);
+      var firstName = value(row, firstColumn);
+      if ((lastName.isEmpty || firstName.isEmpty) && nameColumn >= 0) {
+        final combinedName = value(row, nameColumn);
+        final comma = combinedName.indexOf(',');
+        if (comma > 0) {
+          lastName = combinedName.substring(0, comma).trim();
+          firstName = combinedName.substring(comma + 1).trim();
+        } else {
+          final nameParts = combinedName.split(RegExp(r'\s+'));
+          if (nameParts.length > 1) {
+            lastName = nameParts.removeLast();
+            firstName = nameParts.join(' ');
+          }
+        }
+      }
       if (number.isEmpty && lastName.isEmpty && firstName.isEmpty) continue;
       if (number.isEmpty || lastName.isEmpty || firstName.isEmpty) throw FormatException('Every student needs a student number, last name, and first name. Check row ${students.length + 2}.');
       if (!seen.add(number.toLowerCase())) continue;
