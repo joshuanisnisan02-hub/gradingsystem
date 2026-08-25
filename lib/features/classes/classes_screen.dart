@@ -4,11 +4,13 @@ import 'package:csv/csv.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:pdfrx/pdfrx.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../core/design_system.dart';
 import '../../core/supabase_client.dart';
 import '../../core/workspace_shell.dart';
+import 'instructor_load_parser.dart';
 
 class ClassesScreen extends StatefulWidget {
   const ClassesScreen({super.key});
@@ -19,6 +21,7 @@ class ClassesScreen extends StatefulWidget {
 
 class _ClassesScreenState extends State<ClassesScreen> {
   bool loading = true;
+  bool importingLoad = false;
   String query = '';
   List<Map<String, dynamic>> classes = [];
 
@@ -100,6 +103,45 @@ class _ClassesScreenState extends State<ClassesScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Class could not be created: $error')));
     }
+  }
+
+  Future<void> importInstructorLoad() async {
+    final picked=await FilePicker.platform.pickFiles(type:FileType.custom,allowedExtensions:const ['csv','pdf','rpt'],withData:true);
+    if(picked==null)return;
+    final file=picked.files.single;
+    final bytes=file.bytes;
+    if(bytes==null){if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('The selected file could not be read.')));return;}
+    setState(()=>importingLoad=true);
+    try{
+      final extension=(file.extension??'').toLowerCase();
+      List<InstructorLoadClass> detected;
+      if(extension=='csv'){
+        detected=InstructorLoadParser.parseCsv(utf8.decode(bytes,allowMalformed:true));
+      }else if(extension=='pdf'){
+        final document=await PdfDocument.openData(bytes,sourceName:file.name);
+        try{
+          final text=StringBuffer();
+          for(final page in document.pages){final pageText=await page.loadText();if(pageText!=null)text.writeln(pageText.fullText);}
+          detected=InstructorLoadParser.parsePdfText(text.toString());
+        }finally{await document.dispose();}
+      }else if(extension=='rpt'){
+        detected=InstructorLoadParser.parseRptBytes(bytes);
+      }else{
+        throw const FormatException('Choose a CSV, PDF, or Crystal Reports (.rpt) file.');
+      }
+      if(!mounted)return;
+      final confirmed=await showDialog<List<InstructorLoadClass>>(context:context,builder:(_)=>_InstructorLoadReview(fileName:file.name,detected:detected));
+      if(confirmed==null||confirmed.isEmpty)return;
+      final teacherId=supabase.auth.currentUser!.id;
+      final existingData=await supabase.from('classes').select('subject_code, section').eq('teacher_id',teacherId);
+      final existing={for(final row in existingData)'${row['subject_code']}'.trim().toUpperCase()+'|'+'${row['section']}'.trim().toUpperCase()};
+      final toCreate=confirmed.where((item)=>!existing.contains(item.key)).map((item)=>{'subject_code':item.subjectCode.trim(),'subject_title':item.subjectTitle.trim(),'section':item.section.trim(),'teacher_id':teacherId}).toList();
+      if(toCreate.isNotEmpty)await supabase.from('classes').insert(toCreate);
+      await load();
+      if(mounted){final skipped=confirmed.length-toCreate.length;ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('${toCreate.length} classrooms created${skipped>0?' · $skipped existing classes skipped':''}.')));}
+    }catch(error){
+      if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Instructor load could not be imported: $error'),duration:const Duration(seconds:8)));
+    }finally{if(mounted)setState(()=>importingLoad=false);}
   }
 
   Future<_MasterlistFile?> _pickStudentMasterlist() async {
@@ -209,7 +251,7 @@ class _ClassesScreenState extends State<ClassesScreen> {
               const SizedBox(width: 12),
               OutlinedButton.icon(onPressed: () {}, icon: const Icon(Icons.filter_list_rounded), label: const Text('Filter')),
               const SizedBox(width: 8),
-              OutlinedButton.icon(onPressed: () {}, icon: const Icon(Icons.file_upload_outlined), label: const Text('Import')),
+              OutlinedButton.icon(onPressed: importingLoad?null:importInstructorLoad, icon: importingLoad?const SizedBox(width:16,height:16,child:CircularProgressIndicator(strokeWidth:2)):const Icon(Icons.file_upload_outlined), label: Text(importingLoad?'Reading file…':'Import instructor load')),
             ]),
           ),
           const SizedBox(height: 18),
@@ -236,6 +278,36 @@ class _MasterlistFile {
   const _MasterlistFile(this.name, this.students);
   final String name;
   final List<Map<String, dynamic>> students;
+}
+
+class _InstructorLoadReview extends StatefulWidget{
+  const _InstructorLoadReview({required this.fileName,required this.detected});
+  final String fileName;
+  final List<InstructorLoadClass> detected;
+  @override State<_InstructorLoadReview> createState()=>_InstructorLoadReviewState();
+}
+
+class _InstructorLoadReviewState extends State<_InstructorLoadReview>{
+  late final List<_LoadDraft> drafts=widget.detected.map(_LoadDraft.fromClass).toList();
+  @override void dispose(){for(final draft in drafts){draft.dispose();}super.dispose();}
+  @override Widget build(BuildContext context)=>AlertDialog(
+    title:const Text('Review instructor load'),
+    content:SizedBox(width:760,height:520,child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+      Text('${widget.fileName} · ${drafts.length} classes detected',style:const TextStyle(color:SmartGradeColors.muted,fontSize:12)),
+      const SizedBox(height:12),
+      Container(padding:const EdgeInsets.all(10),decoration:BoxDecoration(color:SmartGradeColors.mustardSoft,borderRadius:BorderRadius.circular(8)),child:const Row(children:[Icon(Icons.info_outline,size:18),SizedBox(width:8),Expanded(child:Text('Check the subject code, title, and section before creating the classrooms.',style:TextStyle(fontSize:11)))])),
+      const SizedBox(height:12),
+      Expanded(child:ListView.separated(itemCount:drafts.length,separatorBuilder:(_,__)=>const SizedBox(height:9),itemBuilder:(context,index){final draft=drafts[index];return Container(padding:const EdgeInsets.all(10),decoration:BoxDecoration(color:const Color(0xFFF8F6F3),border:Border.all(color:SmartGradeColors.line),borderRadius:BorderRadius.circular(8)),child:Row(crossAxisAlignment:CrossAxisAlignment.start,children:[SizedBox(width:125,child:TextField(controller:draft.code,decoration:const InputDecoration(labelText:'Subject code',isDense:true))),const SizedBox(width:8),Expanded(child:TextField(controller:draft.title,decoration:const InputDecoration(labelText:'Subject title',isDense:true))),const SizedBox(width:8),SizedBox(width:135,child:TextField(controller:draft.section,decoration:const InputDecoration(labelText:'Section',isDense:true))),IconButton(tooltip:'Remove',onPressed:(){draft.dispose();setState(()=>drafts.removeAt(index));},icon:const Icon(Icons.close_rounded,color:SmartGradeColors.red))]));})),
+    ])),
+    actions:[TextButton(onPressed:()=>Navigator.pop(context),child:const Text('Cancel')),FilledButton.icon(onPressed:drafts.isEmpty?null:(){final rows=drafts.map((draft)=>draft.value).where((item)=>item.subjectCode.isNotEmpty&&item.subjectTitle.isNotEmpty&&item.section.isNotEmpty).toList();Navigator.pop(context,rows);},icon:const Icon(Icons.add_business_outlined),label:Text('Create ${drafts.length} classrooms'))],
+  );
+}
+
+class _LoadDraft{
+  _LoadDraft.fromClass(InstructorLoadClass item):code=TextEditingController(text:item.subjectCode),title=TextEditingController(text:item.subjectTitle),section=TextEditingController(text:item.section);
+  final TextEditingController code,title,section;
+  InstructorLoadClass get value=>InstructorLoadClass(subjectCode:code.text.trim(),subjectTitle:title.text.trim(),section:section.text.trim());
+  void dispose(){code.dispose();title.dispose();section.dispose();}
 }
 
 class _Metric extends StatelessWidget {

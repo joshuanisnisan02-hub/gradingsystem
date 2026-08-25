@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:pdfrx/pdfrx.dart';
 
 import 'features/auth/login_screen.dart';
 import 'features/classes/classes_screen.dart';
@@ -11,6 +12,7 @@ import 'core/design_system.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  pdfrxFlutterInitialize();
   const url = String.fromEnvironment(
     'SUPABASE_URL',
     defaultValue: 'https://buwqtthzzrgbmpieakay.supabase.co',
