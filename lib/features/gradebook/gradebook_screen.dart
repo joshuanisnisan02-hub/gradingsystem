@@ -1,9 +1,12 @@
 import 'dart:async';
+import 'dart:convert';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import '../../core/design_system.dart';
 import '../../core/supabase_client.dart';
 import '../../core/workspace_shell.dart';
 import 'grade_calculator.dart';
+import 'exam_csv_parser.dart';
 
 class GradebookScreen extends StatefulWidget {
   const GradebookScreen({super.key, required this.classId});
@@ -40,15 +43,16 @@ class _GradebookScreenState extends State<GradebookScreen> {
       final roster=await supabase.from('class_enrollments').select('id, students(id, student_number, last_name, first_name)').eq('class_id',widget.classId).eq('status','active');
       var assessmentQuery=supabase.from('assessment_items').select().eq('class_id',widget.classId).eq('grading_period',gradingPeriod).eq('archived',false);
       if(category!='overall')assessmentQuery=assessmentQuery.eq('category',category);
-      final assessments=await assessmentQuery.order('category').order('position');
+      final assessments=List<Map<String,dynamic>>.from(await assessmentQuery.order('category').order('position').order('created_at'));
+      assessments.sort(_compareAssessmentItems);
       final savedWeights=await supabase.from('grading_weights').select('category, weight').eq('class_id',widget.classId).eq('grading_period',gradingPeriod);
       final classSettings=await supabase.from('classes').select('grading_base').eq('id',widget.classId).single();
-      final current=await supabase.from('scores').select('enrollment_id, assessment_item_id, raw_score').inFilter('assessment_item_id', List.from(assessments).map((e)=>e['id']).toList());
+      final current=assessments.isEmpty ? <dynamic>[] : await supabase.from('scores').select('enrollment_id, assessment_item_id, raw_score').inFilter('assessment_item_id', assessments.map((e)=>e['id']).toList());
       scores.clear();
       for(final row in current){scores['${row['enrollment_id']}:${row['assessment_item_id']}']=row['raw_score'];}
       final loaded=Map<String,double>.of(_defaultWeights);
       for(final row in savedWeights){loaded['${row['category']}']=(row['weight'] as num).toDouble();}
-      setState((){enrollments=List.from(roster);items=List.from(assessments);weights=loaded;gradingBase=(classSettings['grading_base'] as num?)?.toInt()??30;loading=false;});
+      setState((){enrollments=List.from(roster);items=assessments;weights=loaded;gradingBase=(classSettings['grading_base'] as num?)?.toInt()??30;loading=false;});
     } catch(e){if(mounted){setState(()=>loading=false);ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Gradebook could not be loaded: $e')));}}
   }
   void changeScore(String enrollmentId,String itemId,num? value,num maximum){
@@ -80,14 +84,61 @@ class _GradebookScreenState extends State<GradebookScreen> {
     finally{if(mounted)setState(()=>saving=false);}
   }
   Future<void> addItem() async {
-    final result=await showDialog<_AssessmentItemResult>(context:context,builder:(_)=>_AddItemDialog(categoryLabel:_categoryLabels[category]!,suggestedNumber:items.length+1));
+    final categoryItems=items.where((item)=>item['category']==category).toList();
+    final result=await showDialog<_AssessmentItemResult>(context:context,builder:(_)=>_AddItemDialog(categoryLabel:_categoryLabels[category]!,suggestedNumber:categoryItems.length+1));
     if(result==null)return;
     setState(()=>saving=true);
     try{
-      await supabase.from('assessment_items').insert({'class_id':widget.classId,'grading_period':gradingPeriod,'category':category,'title':result.title,'maximum_score':result.maximumScore,'position':items.length,'source':'manual'});
+      final nextPosition=categoryItems.fold<int>(-1,(current,item){final position=(item['position'] as num?)?.toInt()??-1;return position>current?position:current;})+1;
+      await supabase.from('assessment_items').insert({'class_id':widget.classId,'grading_period':gradingPeriod,'category':category,'title':result.title,'maximum_score':result.maximumScore,'position':nextPosition,'source':'manual'});
       await load();
       if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('${result.title} added to ${_categoryLabels[category]}.')));
     }catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Item could not be added: $e')));}
+    finally{if(mounted)setState(()=>saving=false);}
+  }
+  int _compareAssessmentItems(Map<String,dynamic> a,Map<String,dynamic> b){
+    final categoryOrder=_scoreCategories.indexOf('${a['category']}').compareTo(_scoreCategories.indexOf('${b['category']}'));
+    if(categoryOrder!=0)return categoryOrder;
+    int sequence(Map<String,dynamic> item)=>int.tryParse(RegExp(r'\d+').firstMatch('${item['title']}')?.group(0)??'')??2147483647;
+    final numbered=sequence(a).compareTo(sequence(b));
+    if(numbered!=0)return numbered;
+    final positioned=((a['position'] as num?)?.toInt()??0).compareTo((b['position'] as num?)?.toInt()??0);
+    return positioned!=0?positioned:'${a['title']}'.compareTo('${b['title']}');
+  }
+
+  Future<void> importExamCsv() async {
+    try{
+      final selection=await FilePicker.platform.pickFiles(type:FileType.custom,allowedExtensions:const ['csv'],withData:true);
+      if(selection==null)return;
+      final bytes=selection.files.single.bytes;
+      if(bytes==null)throw const FormatException('The selected CSV could not be read.');
+      final csv=ExamCsvParser.parse(utf8.decode(bytes,allowMalformed:true));
+      final matches=<_ExamMatch>[];
+      final unmatched=<String>[];
+      var blankScores=0;
+      var invalidScores=0;
+      for(final row in csv.rows){
+        final candidates=enrollments.where((enrollment){final student=enrollment['students'] as Map<String,dynamic>;return ExamCsvParser.nameMatches(rosterLastName:'${student['last_name']}',rosterFirstName:'${student['first_name']}',csvName:row.studentName);}).toList();
+        if(candidates.length!=1){unmatched.add(row.studentName);continue;}
+        if(row.score==null){blankScores++;continue;}
+        if(row.score!<0||row.score!>csv.maximumScore){invalidScores++;continue;}
+        matches.add(_ExamMatch(enrollmentId:'${candidates.single['id']}',studentName:row.studentName,score:row.score!));
+      }
+      if(!mounted)return;
+      final approved=await showDialog<bool>(context:context,builder:(_)=>_ExamImportPreview(data:csv,matches:matches,unmatched:unmatched,blankScores:blankScores,invalidScores:invalidScores));
+      if(approved!=true||matches.isEmpty)return;
+      setState(()=>saving=true);
+      Map<String,dynamic>? examItem;
+      for(final item in items){if('${item['title']}'.trim().toLowerCase()==csv.title.trim().toLowerCase()&&(item['maximum_score'] as num).toDouble()==csv.maximumScore){examItem=item;break;}}
+      if(examItem==null){
+        final nextPosition=items.fold<int>(-1,(current,item){final position=(item['position'] as num?)?.toInt()??-1;return position>current?position:current;})+1;
+        examItem=Map<String,dynamic>.from(await supabase.from('assessment_items').insert({'class_id':widget.classId,'grading_period':gradingPeriod,'category':'examination','title':csv.title,'maximum_score':csv.maximumScore,'position':nextPosition,'source':'csv'}).select().single());
+      }
+      final userId=supabase.auth.currentUser!.id;
+      await supabase.from('scores').upsert(matches.map((match)=>{'enrollment_id':match.enrollmentId,'assessment_item_id':examItem!['id'],'raw_score':match.score,'status':'scored','source':'csv','updated_by':userId}).toList(),onConflict:'enrollment_id,assessment_item_id');
+      await load();
+      if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('${matches.length} exam scores imported by student name.')));
+    }catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Exam CSV could not be imported: $e')));}
     finally{if(mounted)setState(()=>saving=false);}
   }
   @override void dispose(){for(final timer in scoreDebounces.values){timer.cancel();}super.dispose();}
@@ -110,6 +161,7 @@ class _GradebookScreenState extends State<GradebookScreen> {
         Wrap(spacing:8,runSpacing:8,crossAxisAlignment:WrapCrossAlignment.center,children:[
           SizedBox(width:150,child:DropdownButtonFormField<String>(initialValue:gradingPeriod,decoration:const InputDecoration(labelText:'Grading period',isDense:true),items:_periodLabels.entries.map((entry)=>DropdownMenuItem(value:entry.key,child:Text(entry.value))).toList(),onChanged:(value){if(value!=null&&value!=gradingPeriod){gradingPeriod=value;load();}})),
           ..._categoryLabels.entries.map((entry)=>ChoiceChip(label:Text(entry.value),selected:category==entry.key,onSelected:(_){if(category!=entry.key){category=entry.key;load();}})),
+          if(category=='examination')OutlinedButton.icon(onPressed:saving?null:importExamCsv,icon:const Icon(Icons.upload_file_outlined,size:17),label:const Text('Import exam CSV')),
           if(category!='overall')OutlinedButton.icon(onPressed:saving?null:addItem,icon:const Icon(Icons.add,size:17),label:const Text('Add item')),
         ]),
         const SizedBox(height: 19),
@@ -166,6 +218,41 @@ class _AssessmentItemResult {
   const _AssessmentItemResult({required this.title,required this.maximumScore});
   final String title;
   final double maximumScore;
+}
+
+class _ExamMatch {
+  const _ExamMatch({required this.enrollmentId,required this.studentName,required this.score});
+  final String enrollmentId;
+  final String studentName;
+  final double score;
+}
+
+class _ExamImportPreview extends StatelessWidget {
+  const _ExamImportPreview({required this.data,required this.matches,required this.unmatched,required this.blankScores,required this.invalidScores});
+  final ExamCsvData data;
+  final List<_ExamMatch> matches;
+  final List<String> unmatched;
+  final int blankScores;
+  final int invalidScores;
+  @override Widget build(BuildContext context)=>AlertDialog(
+    title:const Text('Review exam CSV'),
+    content:SizedBox(width:500,child:SingleChildScrollView(child:Column(mainAxisSize:MainAxisSize.min,crossAxisAlignment:CrossAxisAlignment.start,children:[
+      Text(data.title,style:const TextStyle(fontWeight:FontWeight.w800,fontSize:16)),
+      const SizedBox(height:4),Text('Highest possible score: ${data.maximumScore.toStringAsFixed(data.maximumScore%1==0?0:2)}',style:const TextStyle(color:SmartGradeColors.muted)),
+      const SizedBox(height:16),_ImportSummary(icon:Icons.check_circle_outline,color:const Color(0xFF347147),text:'${matches.length} names matched with scores'),
+      _ImportSummary(icon:Icons.remove_circle_outline,color:SmartGradeColors.mustard,text:'$blankScores matched students have no score'),
+      if(invalidScores>0)_ImportSummary(icon:Icons.error_outline,color:SmartGradeColors.red,text:'$invalidScores scores are outside the allowed range'),
+      if(unmatched.isNotEmpty)...[const SizedBox(height:12),Text('${unmatched.length} names were not uniquely matched:',style:const TextStyle(fontWeight:FontWeight.w800)),const SizedBox(height:6),Text(unmatched.take(8).join('\n'),style:const TextStyle(fontSize:12,color:SmartGradeColors.muted)),if(unmatched.length>8)Text('…and ${unmatched.length-8} more',style:const TextStyle(fontSize:12,color:SmartGradeColors.muted))],
+      const SizedBox(height:14),const Text('Only matched names with valid scores will be imported. Student ID is not used.',style:TextStyle(fontSize:11,color:SmartGradeColors.muted)),
+    ]))),
+    actions:[TextButton(onPressed:()=>Navigator.pop(context,false),child:const Text('Cancel')),FilledButton(onPressed:matches.isEmpty?null:()=>Navigator.pop(context,true),child:Text('Import ${matches.length} scores'))],
+  );
+}
+
+class _ImportSummary extends StatelessWidget {
+  const _ImportSummary({required this.icon,required this.color,required this.text});
+  final IconData icon;final Color color;final String text;
+  @override Widget build(BuildContext context)=>Padding(padding:const EdgeInsets.only(bottom:8),child:Row(children:[Icon(icon,size:19,color:color),const SizedBox(width:8),Text(text,style:const TextStyle(fontWeight:FontWeight.w700))]));
 }
 
 class _AddItemDialog extends StatefulWidget {
