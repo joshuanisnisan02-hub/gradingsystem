@@ -1,5 +1,10 @@
+import 'dart:convert';
+
+import 'package:csv/csv.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../core/design_system.dart';
 import '../../core/supabase_client.dart';
@@ -38,28 +43,113 @@ class _ClassesScreenState extends State<ClassesScreen> {
     final code = TextEditingController();
     final title = TextEditingController();
     final section = TextEditingController();
-    final accepted = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
+    List<Map<String, dynamic>> importedStudents = [];
+    String? selectedFile;
+    String? importError;
+    final accepted = await showDialog<bool>(context: context, builder: (context) => StatefulBuilder(builder: (context, setDialogState) => AlertDialog(
       title: const Text('Create a class'),
-      content: SizedBox(width: 420, child: Column(mainAxisSize: MainAxisSize.min, children: [
+      content: SingleChildScrollView(child: SizedBox(width: 420, child: Column(mainAxisSize: MainAxisSize.min, children: [
         TextField(controller: code, autofocus: true, decoration: const InputDecoration(labelText: 'Subject code', hintText: 'IT 101')),
         const SizedBox(height: 14),
         TextField(controller: title, decoration: const InputDecoration(labelText: 'Subject title')),
         const SizedBox(height: 14),
         TextField(controller: section, decoration: const InputDecoration(labelText: 'Section')),
-      ])),
+        const SizedBox(height: 18),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(color: const Color(0xFFF8F6F3), border: Border.all(color: SmartGradeColors.line), borderRadius: BorderRadius.circular(9)),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('STUDENT MASTERLIST (OPTIONAL)', style: TextStyle(fontSize: 10, letterSpacing: 1, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 6),
+            const Text('CSV columns: student_number, last_name, first_name. Email, course, and year_level are optional.', style: TextStyle(fontSize: 11, height: 1.4, color: SmartGradeColors.muted)),
+            const SizedBox(height: 11),
+            OutlinedButton.icon(
+              onPressed: () async {
+                try {
+                  final result = await _pickStudentMasterlist();
+                  if (result == null) return;
+                  setDialogState(() { selectedFile = result.name; importedStudents = result.students; importError = null; });
+                } catch (error) {
+                  setDialogState(() { selectedFile = null; importedStudents = []; importError = '$error'; });
+                }
+              },
+              icon: const Icon(Icons.upload_file_outlined),
+              label: const Text('Upload student masterlist'),
+            ),
+            if (selectedFile != null) Padding(padding: const EdgeInsets.only(top: 9), child: Row(children: [const Icon(Icons.check_circle, size: 17, color: Color(0xFF347147)), const SizedBox(width: 7), Expanded(child: Text('$selectedFile · ${importedStudents.length} students', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700)))])),
+            if (importError != null) Padding(padding: const EdgeInsets.only(top: 9), child: Text(importError!, style: const TextStyle(fontSize: 11, color: SmartGradeColors.red))),
+          ]),
+        ),
+      ]))),
       actions: [
         TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-        FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Create class')),
+        FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(importedStudents.isEmpty ? 'Create class' : 'Create & import')),
       ],
-    ));
+    )));
     if (accepted != true || code.text.trim().isEmpty || title.text.trim().isEmpty || section.text.trim().isEmpty) return;
     try {
-      await supabase.from('classes').insert({'subject_code': code.text.trim(), 'subject_title': title.text.trim(), 'section': section.text.trim(), 'teacher_id': supabase.auth.currentUser!.id});
+      final created = await supabase.from('classes').insert({'subject_code': code.text.trim(), 'subject_title': title.text.trim(), 'section': section.text.trim(), 'teacher_id': supabase.auth.currentUser!.id}).select('id').single();
+      if (importedStudents.isNotEmpty) await _importStudents(created['id'] as String, importedStudents);
       await load();
+      if (mounted && importedStudents.isNotEmpty) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${importedStudents.length} students imported successfully.')));
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Class could not be created: $error')));
     }
+  }
+
+  Future<_MasterlistFile?> _pickStudentMasterlist() async {
+    final result = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: const ['csv'], withData: true);
+    if (result == null) return null;
+    final file = result.files.single;
+    final bytes = file.bytes;
+    if (bytes == null) throw const FormatException('The selected CSV could not be read.');
+    final text = utf8.decode(bytes, allowMalformed: true);
+    final rows = const CsvToListConverter(shouldParseNumbers: false).convert(text);
+    if (rows.length < 2) throw const FormatException('The CSV must contain a header and at least one student.');
+    final headers = rows.first.map((cell) => '$cell'.replaceFirst('\ufeff', '').trim().toLowerCase().replaceAll(' ', '_')).toList();
+    int column(List<String> names) => headers.indexWhere(names.contains);
+    final numberColumn = column(const ['student_number', 'student_no', 'student_id', 'id_number']);
+    final lastColumn = column(const ['last_name', 'lastname', 'surname']);
+    final firstColumn = column(const ['first_name', 'firstname', 'given_name']);
+    final emailColumn = column(const ['email', 'email_address']);
+    final courseColumn = column(const ['course', 'program']);
+    final yearColumn = column(const ['year_level', 'year']);
+    if (numberColumn < 0 || lastColumn < 0 || firstColumn < 0) throw const FormatException('Required columns: student_number, last_name, first_name.');
+    String value(List<dynamic> row, int index) => index >= 0 && index < row.length ? '${row[index]}'.trim() : '';
+    final students = <Map<String, dynamic>>[];
+    final seen = <String>{};
+    for (final row in rows.skip(1)) {
+      final number = value(row, numberColumn);
+      final lastName = value(row, lastColumn);
+      final firstName = value(row, firstColumn);
+      if (number.isEmpty && lastName.isEmpty && firstName.isEmpty) continue;
+      if (number.isEmpty || lastName.isEmpty || firstName.isEmpty) throw FormatException('Every student needs a student number, last name, and first name. Check row ${students.length + 2}.');
+      if (!seen.add(number.toLowerCase())) continue;
+      students.add({'student_number': number, 'last_name': lastName, 'first_name': firstName, if (value(row, emailColumn).isNotEmpty) 'email': value(row, emailColumn), if (value(row, courseColumn).isNotEmpty) 'course': value(row, courseColumn), if (value(row, yearColumn).isNotEmpty) 'year_level': value(row, yearColumn)});
+    }
+    if (students.isEmpty) throw const FormatException('No valid student rows were found.');
+    return _MasterlistFile(file.name, students);
+  }
+
+  Future<void> _importStudents(String classId, List<Map<String, dynamic>> rows) async {
+    final numbers = rows.map((student) => student['student_number'] as String).toList();
+    final existingData = await supabase.from('students').select('id, student_number').inFilter('student_number', numbers);
+    final existing = <String, String>{for (final student in existingData) '${student['student_number']}': '${student['id']}'};
+    const uuid = Uuid();
+    final newStudents = <Map<String, dynamic>>[];
+    for (final row in rows) {
+      final number = row['student_number'] as String;
+      if (!existing.containsKey(number)) {
+        final id = uuid.v4();
+        existing[number] = id;
+        newStudents.add({'id': id, ...row});
+      }
+    }
+    if (newStudents.isNotEmpty) await supabase.from('students').insert(newStudents);
+    final enrollments = rows.map((student) => {'class_id': classId, 'student_id': existing[student['student_number']]!, 'status': 'active'}).toList();
+    await supabase.from('class_enrollments').upsert(enrollments, onConflict: 'class_id,student_id', ignoreDuplicates: true);
   }
 
   @override
@@ -121,6 +211,12 @@ class _ClassesScreenState extends State<ClassesScreen> {
       ),
     );
   }
+}
+
+class _MasterlistFile {
+  const _MasterlistFile(this.name, this.students);
+  final String name;
+  final List<Map<String, dynamic>> students;
 }
 
 class _Metric extends StatelessWidget {
