@@ -187,7 +187,7 @@ class _GradebookScreenState extends State<GradebookScreen> {
                 DataCell(Container(padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5), decoration: BoxDecoration(color: average < 75 ? const Color(0xFFFFE8E8) : const Color(0xFFEAF4EC), borderRadius: BorderRadius.circular(12)), child: Text('${average.toStringAsFixed(1)}%', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: average < 75 ? SmartGradeColors.red : const Color(0xFF347147))))),
               ]);
             }).toList(),
-          ))))))),
+          )))))))),
           if (MediaQuery.sizeOf(context).width >= 1180) ...[const SizedBox(width: 14), const SizedBox(width: 245, child: _Insights())],
         ])),
       ]),
