@@ -16,7 +16,7 @@ class InstructorLoadParser {
   static List<InstructorLoadClass> parseCsv(String source){
     final rows=const CsvToListConverter(eol:'\n',shouldParseNumbers:false).convert(source.replaceAll('\r\n','\n').replaceAll('\r','\n'));
     if(rows.length<2)throw const FormatException('The CSV must contain a header and at least one class.');
-    final headers=rows.first.map((value)=>'$value'.replaceFirst('\ufeff','').trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'),'_')).toList();
+    final headers=rows.first.map((value)=>'$value'.replaceFirst('\ufeff','').trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'),'_').replaceAll(RegExp(r'^_+|_+$'),'')).toList();
     int column(List<String> names)=>headers.indexWhere(names.contains);
     final codeIndex=column(const ['course_no','course_number','subject_code','course_code','code']);
     final titleIndex=column(const ['descriptive_title','subject_title','course_title','title','subject']);
@@ -30,7 +30,7 @@ class InstructorLoadParser {
     final lines=source.replaceAll('\r','\n').split('\n').map((line)=>line.trim()).where((line)=>line.isNotEmpty).toList();
     final classes=<InstructorLoadClass>[];
     final timeLine=RegExp(r'^\d{1,2}:\d{2}.*?\s+(\d+)\s+(.+)$',caseSensitive:false);
-    final detailsLine=RegExp(r'^(.+?)\s+(\d+)\s+(.+?)\s+(Normal|Merged|Honorarium)\s*$',caseSensitive:false);
+    final detailsLine=RegExp(r'^(.+?\s+\d+)\s+(\d+)\s+(.+?)\s+(Normal|Merged|Honorarium)\s*$',caseSensitive:false);
     var titleStart=0;
     final headerIndex=lines.indexWhere((line)=>line.contains('Time')&&line.contains('Course No.'));
     if(headerIndex>=0)titleStart=headerIndex+1;
