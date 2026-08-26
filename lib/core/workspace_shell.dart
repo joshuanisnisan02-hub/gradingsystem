@@ -33,9 +33,7 @@ class WorkspaceShell extends StatelessWidget {
               const Spacer(),
               ...actions,
               const SizedBox(width: 12),
-              const CircleAvatar(radius: 16, backgroundColor: SmartGradeColors.mustard, foregroundColor: SmartGradeColors.black, child: Icon(Icons.person_rounded, size: 18)),
-              const SizedBox(width: 9),
-              if (!compact) const Text('Teacher Account', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+              const _AccountIdentity(),
             ]),
           ),
           Expanded(child: child),
@@ -43,6 +41,75 @@ class WorkspaceShell extends StatelessWidget {
       ]),
     );
   });
+}
+
+
+class _AccountIdentity extends StatefulWidget {
+  const _AccountIdentity();
+
+  @override
+  State<_AccountIdentity> createState() => _AccountIdentityState();
+}
+
+class _AccountIdentityState extends State<_AccountIdentity> {
+  late final Future<String> _displayName = _loadDisplayName();
+
+  Future<String> _loadDisplayName() async {
+    final user = supabase.auth.currentUser;
+    if (user == null) return 'Account';
+
+    try {
+      final profile = await supabase
+          .from('profiles')
+          .select('full_name')
+          .eq('id', user.id)
+          .maybeSingle();
+      final fullName = profile?['full_name']?.toString().trim();
+      if (fullName != null && fullName.isNotEmpty) return fullName;
+    } catch (_) {
+      // Fall back to Auth metadata or email when a profile is unavailable.
+    }
+
+    final metadataName =
+        (user.userMetadata?['full_name'] ?? user.userMetadata?['name'])
+            ?.toString()
+            .trim();
+    if (metadataName != null && metadataName.isNotEmpty) return metadataName;
+
+    final email = user.email?.trim();
+    if (email != null && email.isNotEmpty) return email;
+    return 'Account';
+  }
+
+  @override
+  Widget build(BuildContext context) => FutureBuilder<String>(
+        future: _displayName,
+        builder: (context, snapshot) => Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CircleAvatar(
+              radius: 16,
+              backgroundColor: SmartGradeColors.mustard,
+              foregroundColor: SmartGradeColors.black,
+              child: Icon(Icons.person_rounded, size: 18),
+            ),
+            const SizedBox(width: 9),
+            if (MediaQuery.sizeOf(context).width >= 850)
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 180),
+                child: Text(
+                  snapshot.data ?? 'Account',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      );
 }
 
 class _IconRail extends StatelessWidget {
