@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
+import 'package:csv/csv.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import '../../core/design_system.dart';
@@ -41,7 +43,7 @@ class _GradebookScreenState extends State<GradebookScreen> {
   Future<void> load() async {
     if(mounted)setState(()=>loading=true);
     try {
-      final roster=await supabase.from('class_enrollments').select('id, students(id, student_number, last_name, first_name)').eq('class_id',widget.classId).eq('status','active');
+      final roster=await supabase.from('class_enrollments').select('id, students(id, student_number, last_name, first_name, course, year_level)').eq('class_id',widget.classId).eq('status','active');
       var assessmentQuery=supabase.from('assessment_items').select().eq('class_id',widget.classId).eq('grading_period',gradingPeriod).eq('archived',false);
       if(category!='overall')assessmentQuery=assessmentQuery.eq('category',category);
       final assessments=List<Map<String,dynamic>>.from(await assessmentQuery.order('category').order('position').order('created_at'));
@@ -142,6 +144,70 @@ class _GradebookScreenState extends State<GradebookScreen> {
     }catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Exam CSV could not be imported: $e')));}
     finally{if(mounted)setState(()=>saving=false);}
   }
+
+  Uint8List _csvBytes(List<List<dynamic>> rows){
+    final csv=const ListToCsvConverter().convert(rows);
+    return Uint8List.fromList([0xEF,0xBB,0xBF,...utf8.encode(csv)]);
+  }
+  String _safeFilePart(Object? value)=>'${value??''}'.trim().replaceAll(RegExp(r'[^A-Za-z0-9 _-]+'),'').replaceAll(RegExp(r'\s+'),' ').trim();
+  Future<void> _saveCsv(String fileName,List<List<dynamic>> rows) async {
+    await FilePicker.platform.saveFile(dialogTitle:'Save CSV export',fileName:fileName,type:FileType.custom,allowedExtensions:const ['csv'],bytes:_csvBytes(rows));
+    if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('$fileName exported.')));
+  }
+  Future<void> exportCurrentCategoryCsv() async {
+    try{
+      setState(()=>saving=true);
+      final period=_periodLabels[gradingPeriod]!;
+      final label=_categoryLabels[category]!;
+      final rows=<List<dynamic>>[];
+      if(category=='overall'){
+        rows.add(['Student ID','Name',..._scoreCategories.map((key)=>_categoryLabels[key]),'Period Grade','Remarks']);
+        for(final enrollment in enrollments){
+          final student=enrollment['students'] as Map<String,dynamic>;
+          final categoryGrades=<String,double>{};
+          for(final key in _scoreCategories){final categoryItems=items.where((item)=>item['category']==key).toList();categoryGrades[key]=GradeCalculator.categoryTotal(categoryItems.map((item)=>scores['${enrollment['id']}:${item['id']}']).toList(),categoryItems.map((item)=>(item['maximum_score'] as num)).toList(),base:gradingBase);}
+          final grade=_scoreCategories.fold<double>(0,(sum,key)=>sum+(categoryGrades[key]??0)*(weights[key]??0)/100);
+          rows.add([student['student_number'],'${student['last_name']}, ${student['first_name']}',..._scoreCategories.map((key)=>categoryGrades[key]!.toStringAsFixed(2)),grade.toStringAsFixed(2),grade>=75?'PASSED':'FAILED']);
+        }
+      }else{
+        rows.add(['Student ID','Name',...items.map((item)=>'${item['title']} (Max ${item['maximum_score']})'),'Total','Average']);
+        for(final enrollment in enrollments){
+          final student=enrollment['students'] as Map<String,dynamic>;
+          final earned=items.fold<double>(0,(sum,item)=>sum+(scores['${enrollment['id']}:${item['id']}']??0).toDouble());
+          final possible=items.fold<double>(0,(sum,item)=>sum+(item['maximum_score'] as num).toDouble());
+          rows.add([student['student_number'],'${student['last_name']}, ${student['first_name']}',...items.map((item)=>scores['${enrollment['id']}:${item['id']}']?.toString()??''),earned.toStringAsFixed(2),GradeCalculator.transmutedPercentage(earned,possible,base:gradingBase).toStringAsFixed(2)]);
+        }
+      }
+      final fileName='${_safeFilePart(classInfo?['subject_code'])}_${_safeFilePart(classInfo?['section'])}_${_safeFilePart(period)}_${_safeFilePart(label)}.csv';
+      await _saveCsv(fileName,rows);
+    }catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Gradebook CSV could not be exported: $e')));}
+    finally{if(mounted)setState(()=>saving=false);}
+  }
+  Future<void> exportSchoolGradesCsv() async {
+    try{
+      setState(()=>saving=true);
+      final allItems=List<Map<String,dynamic>>.from(await supabase.from('assessment_items').select().eq('class_id',widget.classId).eq('grading_period',gradingPeriod).eq('archived',false).order('category').order('position'));
+      final allScores=<String,num?>{};
+      if(allItems.isNotEmpty){
+        final scoreRows=await supabase.from('scores').select('enrollment_id, assessment_item_id, raw_score').inFilter('assessment_item_id',allItems.map((item)=>item['id']).toList());
+        for(final row in scoreRows){allScores['${row['enrollment_id']}:${row['assessment_item_id']}']=row['raw_score'];}
+      }
+      final periodColumn={'prelim':4,'midterm':5,'semifinal':6,'final':7}[gradingPeriod]!;
+      final rows=<List<dynamic>>[['Student ID','Name','Course','Year Level','PRELIM','MIDTERM','SEMI','FINAL','AVERAGE']];
+      for(final enrollment in enrollments){
+        final student=enrollment['students'] as Map<String,dynamic>;
+        final categoryGrades=<String,double>{};
+        for(final key in _scoreCategories){final categoryItems=allItems.where((item)=>item['category']==key).toList();categoryGrades[key]=GradeCalculator.categoryTotal(categoryItems.map((item)=>allScores['${enrollment['id']}:${item['id']}']).toList(),categoryItems.map((item)=>(item['maximum_score'] as num)).toList(),base:gradingBase);}
+        final periodGrade=_scoreCategories.fold<double>(0,(sum,key)=>sum+(categoryGrades[key]??0)*(weights[key]??0)/100);
+        final row=<dynamic>[student['student_number'],'${student['last_name']}, ${student['first_name']}',student['course']??'',student['year_level']??'','','','',''];
+        row[periodColumn]=periodGrade.toStringAsFixed(2);
+        rows.add(row);
+      }
+      final fileName='${_safeFilePart(classInfo?['section'])} - ${_safeFilePart(_periodLabels[gradingPeriod])} Grades - ${_safeFilePart(classInfo?['subject_code'])}.csv';
+      await _saveCsv(fileName,rows);
+    }catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('School grades CSV could not be exported: $e')));}
+    finally{if(mounted)setState(()=>saving=false);}
+  }
   @override void dispose(){for(final timer in scoreDebounces.values){timer.cancel();}super.dispose();}
 
   @override
@@ -164,6 +230,13 @@ class _GradebookScreenState extends State<GradebookScreen> {
           ..._categoryLabels.entries.map((entry)=>ChoiceChip(label:Text(entry.value),selected:category==entry.key,onSelected:(_){if(category!=entry.key){category=entry.key;load();}})),
           if(category=='examination')OutlinedButton.icon(onPressed:saving?null:importExamCsv,icon:const Icon(Icons.upload_file_outlined,size:17),label:const Text('Import exam CSV')),
           if(category!='overall')OutlinedButton.icon(onPressed:saving?null:addItem,icon:const Icon(Icons.add,size:17),label:const Text('Add item')),
+          PopupMenuButton<String>(
+            tooltip:'Export gradebook',
+            enabled:!saving,
+            onSelected:(value){if(value=='category')exportCurrentCategoryCsv();if(value=='school')exportSchoolGradesCsv();},
+            itemBuilder:(_)=>[PopupMenuItem(value:'category',child:ListTile(dense:true,leading:const Icon(Icons.table_view_outlined),title:Text('Export ${_categoryLabels[category]} CSV'),subtitle:Text('${_periodLabels[gradingPeriod]} gradebook'))),const PopupMenuItem(value:'school',child:ListTile(dense:true,leading:Icon(Icons.school_outlined),title:Text('Export school grades CSV'),subtitle:Text('Student ID, Name, Course, Year Level and period grade')))],
+            child:Container(padding:const EdgeInsets.symmetric(horizontal:14,vertical:9),decoration:BoxDecoration(border:Border.all(color:SmartGradeColors.line),borderRadius:BorderRadius.circular(22)),child:const Row(mainAxisSize:MainAxisSize.min,children:[Icon(Icons.download_outlined,size:18,color:SmartGradeColors.red),SizedBox(width:7),Text('Export CSV',style:TextStyle(color:SmartGradeColors.red))])),
+          ),
         ]),
         const SizedBox(height: 19),
         Container(padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10), decoration: BoxDecoration(color: Colors.white, border: Border.all(color: SmartGradeColors.line), borderRadius: BorderRadius.circular(9)), child: const Row(children: [Icon(Icons.info_outline_rounded, color: SmartGradeColors.mustard, size: 19), SizedBox(width: 9), Expanded(child: Text('Enter a score, then press Enter. Changes save automatically.', style: TextStyle(fontSize: 11, color: SmartGradeColors.muted))), Icon(Icons.keyboard_alt_outlined, size: 18, color: SmartGradeColors.muted)])),
@@ -189,7 +262,7 @@ class _GradebookScreenState extends State<GradebookScreen> {
               ]);
             }).toList(),
           )))))))),
-          if (MediaQuery.sizeOf(context).width >= 1180) ...[const SizedBox(width: 14), const SizedBox(width: 245, child: _Insights())],
+          if (MediaQuery.sizeOf(context).width >= 1180) ...[const SizedBox(width: 14), SizedBox(width:245,child:_Insights(onExport:exportCurrentCategoryCsv,onSchoolExport:exportSchoolGradesCsv))],
         ])),
       ]),
     ),
@@ -314,8 +387,9 @@ class _Pill extends StatelessWidget {
 }
 
 class _Insights extends StatelessWidget {
-  const _Insights();
-  @override Widget build(BuildContext context) => Container(padding: const EdgeInsets.all(18), decoration: BoxDecoration(color: Colors.white, border: Border.all(color: SmartGradeColors.line), borderRadius: BorderRadius.circular(9)), child: const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('CLASS INSIGHTS', style: TextStyle(fontSize: 10, letterSpacing: 1.1, fontWeight: FontWeight.w800)), SizedBox(height: 18), _Insight(icon: Icons.warning_amber_rounded, color: SmartGradeColors.red, title: 'Missing scores', detail: 'Review blank cells before finalizing.'), Divider(height: 30), _Insight(icon: Icons.lightbulb_outline_rounded, color: SmartGradeColors.mustard, title: 'Quick tip', detail: 'Press Enter after each score to save.'), Spacer(), Text('ACTIONS', style: TextStyle(fontSize: 9, letterSpacing: 1.1, color: SmartGradeColors.muted, fontWeight: FontWeight.w800)), SizedBox(height: 12), ListTile(contentPadding: EdgeInsets.zero, dense: true, leading: Icon(Icons.download_outlined, size: 18), title: Text('Export gradebook', style: TextStyle(fontSize: 11))), ListTile(contentPadding: EdgeInsets.zero, dense: true, leading: Icon(Icons.print_outlined, size: 18), title: Text('Print class record', style: TextStyle(fontSize: 11)))]));
+  const _Insights({required this.onExport,required this.onSchoolExport});
+  final VoidCallback onExport,onSchoolExport;
+  @override Widget build(BuildContext context) => Container(padding: const EdgeInsets.all(18), decoration: BoxDecoration(color: Colors.white, border: Border.all(color: SmartGradeColors.line), borderRadius: BorderRadius.circular(9)), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('CLASS INSIGHTS', style: TextStyle(fontSize: 10, letterSpacing: 1.1, fontWeight: FontWeight.w800)), const SizedBox(height: 18), const _Insight(icon: Icons.warning_amber_rounded, color: SmartGradeColors.red, title: 'Missing scores', detail: 'Review blank cells before finalizing.'), const Divider(height: 30), const _Insight(icon: Icons.lightbulb_outline_rounded, color: SmartGradeColors.mustard, title: 'Quick tip', detail: 'Press Enter after each score to save.'), const Spacer(), const Text('ACTIONS', style: TextStyle(fontSize: 9, letterSpacing: 1.1, color: SmartGradeColors.muted, fontWeight: FontWeight.w800)), const SizedBox(height: 12), ListTile(onTap:onExport,contentPadding:EdgeInsets.zero,dense:true,leading:const Icon(Icons.download_outlined,size:18),title:const Text('Export selected gradebook',style:TextStyle(fontSize:11))),ListTile(onTap:onSchoolExport,contentPadding:EdgeInsets.zero,dense:true,leading:const Icon(Icons.school_outlined,size:18),title:const Text('Export school grades CSV',style:TextStyle(fontSize:11))),const ListTile(contentPadding:EdgeInsets.zero,dense:true,leading:Icon(Icons.print_outlined,size:18),title:Text('Print class record',style:TextStyle(fontSize:11)))]));
 }
 
 class _Insight extends StatelessWidget {
