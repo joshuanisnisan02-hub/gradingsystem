@@ -144,7 +144,7 @@ class _GradebookScreenState extends State<GradebookScreen> {
         else{final parts=combinedName.split(RegExp(r'\s+'));if(parts.length>1){lastName=parts.removeLast();firstName=parts.join(' ');}}
       }
       if(number.isEmpty&&lastName.isEmpty&&firstName.isEmpty)continue;
-      if(number.isEmpty||lastName.isEmpty||firstName.isEmpty)throw FormatException('Every student needs a Student ID and complete name. Check CSV row '+(students.length+2).toString()+'.');
+      if(number.isEmpty||lastName.isEmpty||firstName.isEmpty)throw FormatException('Every student needs a Student ID and complete name. Check CSV row ${students.length+2}.');
       if(!seen.add(number.toLowerCase()))continue;
       students.add({'student_number':number,'last_name':lastName,'first_name':firstName,if(value(row,emailColumn).isNotEmpty)'email':value(row,emailColumn),if(value(row,courseColumn).isNotEmpty)'course':value(row,courseColumn),if(value(row,yearColumn).isNotEmpty)'year_level':value(row,yearColumn)});
     }
@@ -163,8 +163,8 @@ class _GradebookScreenState extends State<GradebookScreen> {
         content:SizedBox(width:430,child:Column(mainAxisSize:MainAxisSize.min,crossAxisAlignment:CrossAxisAlignment.start,children:[
           Text(imported.fileName,style:const TextStyle(fontWeight:FontWeight.w700)),
           const SizedBox(height:10),
-          Text(imported.students.length.toString()+' students detected · '+newCount.toString()+' new to this class.'),
-          if(newCount<imported.students.length)...[const SizedBox(height:8),Text((imported.students.length-newCount).toString()+' existing students will not be duplicated.',style:const TextStyle(color:SmartGradeColors.muted,fontSize:12))],
+          Text('${imported.students.length} students detected · $newCount new to this class.'),
+          if(newCount<imported.students.length)...[const SizedBox(height:8),Text('${imported.students.length-newCount} existing students will not be duplicated.',style:const TextStyle(color:SmartGradeColors.muted,fontSize:12))],
         ])),
         actions:[TextButton(onPressed:()=>Navigator.pop(context,false),child:const Text('Cancel')),FilledButton.icon(onPressed:()=>Navigator.pop(context,true),icon:const Icon(Icons.upload_file_outlined),label:const Text('Import students'))],
       ));
@@ -183,8 +183,8 @@ class _GradebookScreenState extends State<GradebookScreen> {
       final enrollmentRows=imported.students.map((student)=>{'class_id':widget.classId,'student_id':existing[student['student_number']]!,'status':'active'}).toList();
       await supabase.from('class_enrollments').upsert(enrollmentRows,onConflict:'class_id,student_id');
       await load();
-      if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(imported.students.length.toString()+' students processed · '+newCount.toString()+' added to this class.')));
-    }catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Student masterlist could not be imported: '+e.toString()),duration:const Duration(seconds:8)));}
+      if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('${imported.students.length} students processed · $newCount added to this class.')));
+    }catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Student masterlist could not be imported: $e'),duration:const Duration(seconds:8)));}
     finally{if(mounted)setState(()=>saving=false);}
   }
   Future<void> importExamCsv() async {
