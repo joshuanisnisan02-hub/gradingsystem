@@ -348,7 +348,7 @@ class _GradebookScreenState extends State<GradebookScreen> {
         const SizedBox(height: 19),
         Container(padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10), decoration: BoxDecoration(color: Colors.white, border: Border.all(color: SmartGradeColors.line), borderRadius: BorderRadius.circular(9)), child: const Row(children: [Icon(Icons.info_outline_rounded, color: SmartGradeColors.mustard, size: 19), SizedBox(width: 9), Expanded(child: Text('Enter a score, then press Enter. Changes save automatically.', style: TextStyle(fontSize: 11, color: SmartGradeColors.muted))), Icon(Icons.keyboard_alt_outlined, size: 18, color: SmartGradeColors.muted)])),
         const SizedBox(height: 14),
-        Expanded(child: category=='overall' ? _buildOverallRecord() : items.isEmpty ? _NoItems(categoryLabel:_categoryLabels[category]!,onAdd:addItem) : _buildScoreGrid()),
+        Expanded(child: category=='overall' ? _buildOverallRecord() : items.isEmpty ? _NoItems(categoryLabel:_categoryLabels[category]!,onAdd:addItem) : Row(crossAxisAlignment:CrossAxisAlignment.stretch,children:[Expanded(child:_buildScoreGrid()),if(MediaQuery.sizeOf(context).width>=1180)...[const SizedBox(width:14),SizedBox(width:245,child:_Insights(onExport:exportCurrentCategoryCsv,onSchoolExport:exportSchoolGradesCsv))]])),
       ]),
     ),
   );
