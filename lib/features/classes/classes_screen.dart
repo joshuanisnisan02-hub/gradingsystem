@@ -23,6 +23,7 @@ class _ClassesScreenState extends State<ClassesScreen> {
   bool loading = true;
   bool importingLoad = false;
   String query = '';
+  String statusFilter = 'active';
   List<Map<String, dynamic>> classes = [];
 
   @override
@@ -103,6 +104,59 @@ class _ClassesScreenState extends State<ClassesScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Class could not be created: $error')));
     }
+  }
+
+  Future<void> editClass(Map<String,dynamic> classData) async {
+    final code=TextEditingController(text:'${classData['subject_code']??''}');
+    final title=TextEditingController(text:'${classData['subject_title']??''}');
+    final section=TextEditingController(text:'${classData['section']??''}');
+    final save=await showDialog<bool>(context:context,builder:(context)=>AlertDialog(
+      title:const Text('Edit class'),
+      content:SizedBox(width:420,child:Column(mainAxisSize:MainAxisSize.min,children:[
+        TextField(controller:code,autofocus:true,decoration:const InputDecoration(labelText:'Subject code')),
+        const SizedBox(height:14),
+        TextField(controller:title,decoration:const InputDecoration(labelText:'Subject title')),
+        const SizedBox(height:14),
+        TextField(controller:section,decoration:const InputDecoration(labelText:'Section')),
+      ])),
+      actions:[TextButton(onPressed:()=>Navigator.pop(context,false),child:const Text('Cancel')),FilledButton(onPressed:()=>Navigator.pop(context,true),child:const Text('Save changes'))],
+    ));
+    if(save!=true||code.text.trim().isEmpty||title.text.trim().isEmpty||section.text.trim().isEmpty)return;
+    try{
+      await supabase.from('classes').update({'subject_code':code.text.trim(),'subject_title':title.text.trim(),'section':section.text.trim(),'updated_at':DateTime.now().toUtc().toIso8601String()}).eq('id',classData['id']);
+      await load();
+      if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Class details updated.')));
+    }catch(error){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Class could not be updated: $error')));}
+  }
+
+  Future<void> setClassArchived(Map<String,dynamic> classData,bool archived) async {
+    try{
+      await supabase.from('classes').update({'status':archived?'archived':'active','updated_at':DateTime.now().toUtc().toIso8601String()}).eq('id',classData['id']);
+      await load();
+      if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(archived?'Class archived. Its students and grades were preserved.':'Class restored to Active classes.')));
+    }catch(error){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Class status could not be changed: $error')));}
+  }
+
+  Future<void> deleteClass(Map<String,dynamic> classData) async {
+    final label='${classData['subject_code']} · ${classData['section']}';
+    final confirmed=await showDialog<bool>(context:context,builder:(context)=>AlertDialog(
+      title:const Text('Delete class permanently?'),
+      content:Text('$label and all of its enrollments, assessment items, and scores will be permanently deleted. This cannot be undone. You can choose Archive instead if you want to keep the records.'),
+      actions:[TextButton(onPressed:()=>Navigator.pop(context,false),child:const Text('Cancel')),FilledButton(style:FilledButton.styleFrom(backgroundColor:SmartGradeColors.red),onPressed:()=>Navigator.pop(context,true),child:const Text('Delete permanently'))],
+    ));
+    if(confirmed!=true)return;
+    try{
+      final classId='${classData['id']}';
+      final enrollmentData=await supabase.from('class_enrollments').select('id').eq('class_id',classId);
+      final enrollmentIds=enrollmentData.map<String>((row)=>'${row['id']}').toList();
+      if(enrollmentIds.isNotEmpty)await supabase.from('scores').delete().inFilter('enrollment_id',enrollmentIds);
+      await supabase.from('assessment_items').delete().eq('class_id',classId);
+      await supabase.from('class_enrollments').delete().eq('class_id',classId);
+      await supabase.from('grading_weights').delete().eq('class_id',classId);
+      await supabase.from('classes').delete().eq('id',classId);
+      await load();
+      if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Class permanently deleted.')));
+    }catch(error){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Class could not be deleted. Archive it instead, or check linked audit records. $error'),duration:const Duration(seconds:8)));}
   }
 
   Future<void> importInstructorLoad() async {
@@ -265,8 +319,10 @@ class _ClassesScreenState extends State<ClassesScreen> {
   Widget build(BuildContext context) {
     final filtered = classes.where((row) {
       final text = '${row['subject_code'] ?? ''} ${row['subject_title'] ?? ''} ${row['section'] ?? ''}'.toLowerCase();
-      return text.contains(query.toLowerCase());
+      final status='${row['status']??'active'}';
+      return (statusFilter=='all'||status==statusFilter)&&text.contains(query.toLowerCase());
     }).toList();
+    final activeCount=classes.where((row)=>(row['status']??'active')=='active').length;
     return WorkspaceShell(
       title: 'My Classes',
       active: 'Classes',
@@ -286,7 +342,7 @@ class _ClassesScreenState extends State<ClassesScreen> {
           ]),
           const SizedBox(height: 24),
           Wrap(spacing: 12, runSpacing: 12, children: [
-            _Metric(label: 'ACTIVE CLASSES', value: '${classes.length}', icon: Icons.school_outlined, color: SmartGradeColors.red),
+            _Metric(label: 'ACTIVE CLASSES', value: '$activeCount', icon: Icons.school_outlined, color: SmartGradeColors.red),
             const _Metric(label: 'CURRENT TERM', value: 'Prelim', icon: Icons.calendar_month_outlined, color: SmartGradeColors.mustard),
             const _Metric(label: 'SYNC ATTENTION', value: '2', icon: Icons.sync_problem_outlined, color: SmartGradeColors.black),
           ]),
@@ -297,7 +353,17 @@ class _ClassesScreenState extends State<ClassesScreen> {
             child: Row(children: [
               Expanded(child: TextField(onChanged: (value) => setState(() => query = value), decoration: const InputDecoration(prefixIcon: Icon(Icons.search_rounded), hintText: 'Search classes or sections', filled: false, border: InputBorder.none))),
               const SizedBox(width: 12),
-              OutlinedButton.icon(onPressed: () {}, icon: const Icon(Icons.filter_list_rounded), label: const Text('Filter')),
+              PopupMenuButton<String>(
+                tooltip:'Filter classes',
+                initialValue:statusFilter,
+                onSelected:(value)=>setState(()=>statusFilter=value),
+                itemBuilder:(_)=>const [PopupMenuItem(value:'active',child:Text('Active classes')),PopupMenuItem(value:'archived',child:Text('Archived classes')),PopupMenuItem(value:'all',child:Text('All classes'))],
+                child:Container(
+                  padding:const EdgeInsets.symmetric(horizontal:15,vertical:9),
+                  decoration:BoxDecoration(border:Border.all(color:SmartGradeColors.line),borderRadius:BorderRadius.circular(22)),
+                  child:Row(mainAxisSize:MainAxisSize.min,children:[const Icon(Icons.filter_list_rounded,size:18,color:SmartGradeColors.red),const SizedBox(width:8),Text(statusFilter=='active'?'Active':statusFilter=='archived'?'Archived':'All classes',style:const TextStyle(color:SmartGradeColors.red))]),
+                ),
+              ),
               const SizedBox(width: 8),
               OutlinedButton.icon(onPressed: importingLoad?null:importInstructorLoad, icon: importingLoad?const SizedBox(width:16,height:16,child:CircularProgressIndicator(strokeWidth:2)):const Icon(Icons.file_upload_outlined), label: Text(importingLoad?'Reading file…':'Import instructor load')),
             ]),
@@ -313,7 +379,7 @@ class _ClassesScreenState extends State<ClassesScreen> {
                 physics: const NeverScrollableScrollPhysics(),
                 itemCount: filtered.length,
                 gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: count, mainAxisExtent: 220, crossAxisSpacing: 14, mainAxisSpacing: 14),
-                itemBuilder: (_, index) => _ClassCard(data: filtered[index]),
+                itemBuilder: (_, index) => _ClassCard(data:filtered[index],onEdit:()=>editClass(filtered[index]),onArchive:()=>setClassArchived(filtered[index],(filtered[index]['status']??'active')!='archived'),onDelete:()=>deleteClass(filtered[index])),
               );
             }),
         ]),
@@ -373,8 +439,9 @@ class _Metric extends StatelessWidget {
 }
 
 class _ClassCard extends StatelessWidget {
-  const _ClassCard({required this.data});
+  const _ClassCard({required this.data,required this.onEdit,required this.onArchive,required this.onDelete});
   final Map<String, dynamic> data;
+  final VoidCallback onEdit,onArchive,onDelete;
   @override
   Widget build(BuildContext context) => InkWell(
     borderRadius: BorderRadius.circular(10),
@@ -387,7 +454,17 @@ class _ClassCard extends StatelessWidget {
           Row(children: [
             Container(width: 38, height: 38, decoration: BoxDecoration(color: SmartGradeColors.mustardSoft, borderRadius: BorderRadius.circular(7)), child: const Icon(Icons.menu_book_rounded, size: 20, color: SmartGradeColors.black)),
             const Spacer(),
-            const Icon(Icons.more_horiz_rounded, color: SmartGradeColors.muted),
+            PopupMenuButton<String>(
+              tooltip:'Class actions',
+              onSelected:(value){if(value=='edit')onEdit();if(value=='archive')onArchive();if(value=='delete')onDelete();},
+              itemBuilder:(_)=>[
+                const PopupMenuItem(value:'edit',child:ListTile(dense:true,leading:Icon(Icons.edit_outlined),title:Text('Edit class'))),
+                PopupMenuItem(value:'archive',child:ListTile(dense:true,leading:Icon(data['status']=='archived'?Icons.unarchive_outlined:Icons.archive_outlined),title:Text(data['status']=='archived'?'Restore class':'Archive class'))),
+                const PopupMenuDivider(),
+                const PopupMenuItem(value:'delete',child:ListTile(dense:true,leading:Icon(Icons.delete_outline,color:SmartGradeColors.red),title:Text('Delete permanently',style:TextStyle(color:SmartGradeColors.red)))),
+              ],
+              icon:const Icon(Icons.more_horiz_rounded,color:SmartGradeColors.muted),
+            ),
           ]),
           const SizedBox(height: 15),
           Text('${data['subject_code'] ?? 'CLASS'} · ${data['section'] ?? ''}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
