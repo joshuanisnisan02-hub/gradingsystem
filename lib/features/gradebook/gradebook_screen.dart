@@ -200,7 +200,7 @@ class _GradebookScreenState extends State<GradebookScreen> {
         for(final key in _scoreCategories){final categoryItems=allItems.where((item)=>item['category']==key).toList();categoryGrades[key]=GradeCalculator.categoryTotal(categoryItems.map((item)=>allScores['${enrollment['id']}:${item['id']}']).toList(),categoryItems.map((item)=>(item['maximum_score'] as num)).toList(),base:gradingBase);}
         final periodGrade=_scoreCategories.fold<double>(0,(sum,key)=>sum+(categoryGrades[key]??0)*(weights[key]??0)/100);
         final row=<dynamic>[student['student_number'],'${student['last_name']}, ${student['first_name']}',student['course']??'',student['year_level']??'','','','',''];
-        row[periodColumn]=periodGrade.toStringAsFixed(2);
+        row[periodColumn]=periodGrade.round();
         rows.add(row);
       }
       final fileName='${_safeFilePart(classInfo?['section'])} - ${_safeFilePart(_periodLabels[gradingPeriod])} Grades - ${_safeFilePart(classInfo?['subject_code'])}.csv';
