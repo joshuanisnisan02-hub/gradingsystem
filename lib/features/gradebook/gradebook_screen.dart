@@ -121,6 +121,43 @@ class _GradebookScreenState extends State<GradebookScreen> {
     }catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Item could not be added: $e')));}
     finally{if(mounted)setState(()=>saving=false);}
   }
+  Future<void> deleteAssessmentItem(Map<String,dynamic> item) async {
+    final itemId=item['id'].toString();
+    final itemTitle=item['title'].toString();
+    final confirmed=await showDialog<bool>(context:context,builder:(context)=>AlertDialog(
+      title:const Text('Remove assessment?'),
+      content:SizedBox(width:430,child:Column(mainAxisSize:MainAxisSize.min,crossAxisAlignment:CrossAxisAlignment.start,children:[
+        Text(itemTitle,style:const TextStyle(fontSize:16,fontWeight:FontWeight.w800)),
+        const SizedBox(height:10),
+        const Text('This assessment and all scores recorded under it will be permanently deleted. This action cannot be undone.'),
+      ])),
+      actions:[
+        TextButton(onPressed:()=>Navigator.pop(context,false),child:const Text('Cancel')),
+        FilledButton.icon(
+          style:FilledButton.styleFrom(backgroundColor:SmartGradeColors.red),
+          onPressed:()=>Navigator.pop(context,true),
+          icon:const Icon(Icons.delete_outline),
+          label:const Text('Delete assessment'),
+        ),
+      ],
+    ));
+    if(confirmed!=true)return;
+    setState(()=>saving=true);
+    scoreDebounces.removeWhere((key,timer){
+      final matches=key.endsWith(':$itemId');
+      if(matches)timer.cancel();
+      return matches;
+    });
+    try{
+      await supabase.from('scores').delete().eq('assessment_item_id',itemId);
+      await supabase.from('assessment_items').delete().eq('id',itemId);
+      await load();
+      if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('$itemTitle was removed.')));
+    }catch(e){
+      if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Assessment could not be removed: $e'),duration:const Duration(seconds:8)));
+    }finally{if(mounted)setState(()=>saving=false);}
+  }
+
   int _compareAssessmentItems(Map<String,dynamic> a,Map<String,dynamic> b){
     final categoryOrder=_scoreCategories.indexOf('${a['category']}').compareTo(_scoreCategories.indexOf('${b['category']}'));
     if(categoryOrder!=0)return categoryOrder;
@@ -389,7 +426,17 @@ class _GradebookScreenState extends State<GradebookScreen> {
             controller:scoreHorizontalController,
             scrollDirection:Axis.horizontal,
             child:SizedBox(width:contentWidth,child:Column(children:[
-              SizedBox(height:56,child:Row(children:items.map((item)=>SizedBox(width:104,child:Center(child:Text('${item['title']}\nMAX ${item['maximum_score']}',textAlign:TextAlign.center,maxLines:2,overflow:TextOverflow.ellipsis,style:const TextStyle(fontSize:10,fontWeight:FontWeight.w700))))).toList())),
+              SizedBox(height:56,child:Row(children:items.map((item)=>SizedBox(width:104,child:Stack(children:[
+                Positioned.fill(child:Padding(padding:const EdgeInsets.fromLTRB(8,4,24,4),child:Center(child:Text('${item['title']}\nMAX ${item['maximum_score']}',textAlign:TextAlign.center,maxLines:2,overflow:TextOverflow.ellipsis,style:const TextStyle(fontSize:10,fontWeight:FontWeight.w700))))),
+                Positioned(top:3,right:2,child:IconButton(
+                  tooltip:'Remove ${item['title']}',
+                  onPressed:saving?null:()=>deleteAssessmentItem(item),
+                  icon:const Icon(Icons.delete_outline,size:15),
+                  color:SmartGradeColors.red,
+                  padding:EdgeInsets.zero,
+                  constraints:const BoxConstraints.tightFor(width:24,height:24),
+                )),
+              ]))).toList())),
               Expanded(child:ListView.builder(controller:scoreVerticalController,itemExtent:60,itemCount:enrollments.length,itemBuilder:(context,rowIndex){
                 final enrollment=enrollments[rowIndex];
                 return Container(
