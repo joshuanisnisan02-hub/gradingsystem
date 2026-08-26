@@ -9,21 +9,33 @@ class InstructorLoadClass {
   final String subjectTitle;
   final String section;
 
-  String get key=>'${subjectCode.trim().toUpperCase()}|${section.trim().toUpperCase()}';
+  String get key=>InstructorLoadParser.normalizedKey(subjectCode,section);
 }
 
 class InstructorLoadParser {
+  static String normalizedKey(String subjectCode,String section){
+    String normalize(String value)=>value.trim().toUpperCase().replaceAll(RegExp(r'\s+'),' ');
+    final normalizedSection=normalize(section).replaceFirst(RegExp(r'\s+REGULAR$'),'').trim();
+    return '${normalize(subjectCode)}|$normalizedSection';
+  }
+
   static List<InstructorLoadClass> parseCsv(String source){
     final rows=const CsvToListConverter(eol:'\n',shouldParseNumbers:false).convert(source.replaceAll('\r\n','\n').replaceAll('\r','\n'));
     if(rows.length<2)throw const FormatException('The CSV must contain a header and at least one class.');
-    final headers=rows.first.map((value)=>'$value'.replaceFirst('\ufeff','').trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'),'_').replaceAll(RegExp(r'^_+|_+$'),'')).toList();
+    String headerName(dynamic value)=>'$value'.replaceFirst('\ufeff','').trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'),'_').replaceAll(RegExp(r'^_+|_+$'),'');
+    final headerRow=rows.indexWhere((row){
+      final names=row.map(headerName).toSet();
+      return names.intersection(const {'course_no','course_number','subject_code','course_code'}).isNotEmpty&&names.intersection(const {'section','class_section','class_code'}).isNotEmpty;
+    });
+    if(headerRow<0)throw const FormatException('Required columns: Course No./Subject Code, Descriptive Title/Subject Title, and Section.');
+    final headers=rows[headerRow].map(headerName).toList();
     int column(List<String> names)=>headers.indexWhere(names.contains);
     final codeIndex=column(const ['course_no','course_number','subject_code','course_code','code']);
     final titleIndex=column(const ['descriptive_title','subject_title','course_title','title','subject']);
     final sectionIndex=column(const ['section','class_section','class_code']);
     if(codeIndex<0||titleIndex<0||sectionIndex<0)throw const FormatException('Required columns: Course No./Subject Code, Descriptive Title/Subject Title, and Section.');
     String cell(List<dynamic> row,int index)=>index<row.length?'${row[index]}'.trim():'';
-    return _deduplicate(rows.skip(1).map((row)=>InstructorLoadClass(subjectCode:cell(row,codeIndex),subjectTitle:cell(row,titleIndex),section:cell(row,sectionIndex))).where((item)=>item.subjectCode.isNotEmpty&&item.subjectTitle.isNotEmpty&&item.section.isNotEmpty));
+    return _deduplicate(rows.skip(headerRow+1).map((row)=>InstructorLoadClass(subjectCode:cell(row,codeIndex),subjectTitle:cell(row,titleIndex),section:cell(row,sectionIndex))).where((item)=>item.subjectCode.isNotEmpty&&item.subjectTitle.isNotEmpty&&item.section.isNotEmpty));
   }
 
   static List<InstructorLoadClass> parsePdfText(String source){
