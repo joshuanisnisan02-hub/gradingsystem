@@ -28,6 +28,11 @@ class _GradebookScreenState extends State<GradebookScreen> {
   Map<String,dynamic>? classInfo;
   Map<String,double> weights=Map.of(_defaultWeights);
   final Map<String,Timer> scoreDebounces={};
+  final ScrollController scoreHorizontalController=ScrollController();
+  final ScrollController studentVerticalController=ScrollController();
+  final ScrollController scoreVerticalController=ScrollController();
+  final ScrollController summaryVerticalController=ScrollController();
+  bool syncingVerticalScroll=false;
 
   static const Map<String,double> _defaultWeights={
     'participation':10,
@@ -40,7 +45,23 @@ class _GradebookScreenState extends State<GradebookScreen> {
   static const Map<String,String> _categoryLabels={'participation':'Participation','quiz':'Quizzes','assignment':'Assignments','attendance':'Attendance','examination':'Examination','overall':'Overall Record'};
   static const List<String> _scoreCategories=['participation','quiz','assignment','attendance','examination'];
 
-  @override void initState(){super.initState();load();}
+  @override void initState(){
+    super.initState();
+    studentVerticalController.addListener(()=>_syncVerticalScroll(studentVerticalController));
+    scoreVerticalController.addListener(()=>_syncVerticalScroll(scoreVerticalController));
+    summaryVerticalController.addListener(()=>_syncVerticalScroll(summaryVerticalController));
+    load();
+  }
+  void _syncVerticalScroll(ScrollController source){
+    if(syncingVerticalScroll||!source.hasClients)return;
+    syncingVerticalScroll=true;
+    for(final target in [studentVerticalController,scoreVerticalController,summaryVerticalController]){
+      if(identical(target,source)||!target.hasClients)continue;
+      final offset=source.offset.clamp(target.position.minScrollExtent,target.position.maxScrollExtent);
+      if((target.offset-offset).abs()>.5)target.jumpTo(offset);
+    }
+    syncingVerticalScroll=false;
+  }
   Future<void> load() async {
     if(mounted)setState(()=>loading=true);
     try {
@@ -286,7 +307,14 @@ class _GradebookScreenState extends State<GradebookScreen> {
     }catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('School grades CSV could not be exported: $e')));}
     finally{if(mounted)setState(()=>saving=false);}
   }
-  @override void dispose(){for(final timer in scoreDebounces.values){timer.cancel();}super.dispose();}
+  @override void dispose(){
+    for(final timer in scoreDebounces.values){timer.cancel();}
+    scoreHorizontalController.dispose();
+    studentVerticalController.dispose();
+    scoreVerticalController.dispose();
+    summaryVerticalController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) => WorkspaceShell(
@@ -320,31 +348,98 @@ class _GradebookScreenState extends State<GradebookScreen> {
         const SizedBox(height: 19),
         Container(padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10), decoration: BoxDecoration(color: Colors.white, border: Border.all(color: SmartGradeColors.line), borderRadius: BorderRadius.circular(9)), child: const Row(children: [Icon(Icons.info_outline_rounded, color: SmartGradeColors.mustard, size: 19), SizedBox(width: 9), Expanded(child: Text('Enter a score, then press Enter. Changes save automatically.', style: TextStyle(fontSize: 11, color: SmartGradeColors.muted))), Icon(Icons.keyboard_alt_outlined, size: 18, color: SmartGradeColors.muted)])),
         const SizedBox(height: 14),
-        Expanded(child: category=='overall' ? _buildOverallRecord() : items.isEmpty ? _NoItems(categoryLabel:_categoryLabels[category]!,onAdd:addItem) : Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Expanded(child: Container(decoration: BoxDecoration(color: Colors.white, border: Border.all(color: SmartGradeColors.line), borderRadius: BorderRadius.circular(9)), clipBehavior: Clip.antiAlias, child: LayoutBuilder(builder:(context,constraints)=>SingleChildScrollView(scrollDirection: Axis.horizontal, child: ConstrainedBox(constraints:BoxConstraints(minWidth:constraints.maxWidth),child:SingleChildScrollView(child: Theme(data: Theme.of(context).copyWith(dividerColor: SmartGradeColors.line), child: DataTable(
-            headingRowColor: WidgetStateProperty.all(const Color(0xFFF0EEEB)),
-            horizontalMargin:16,
-            columnSpacing:items.length>=6?18:32,
-            dataRowMinHeight: 60,
-            dataRowMaxHeight: 60,
-            columns: [const DataColumn(label: SizedBox(width: 210, child: Text('STUDENT', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: .7)))), ...items.map((item) => DataColumn(label: Text('${item['title']}\nMAX ${item['maximum_score']}', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700)))), const DataColumn(label: Text('TOTAL')), const DataColumn(label: Text('AVERAGE'))],
-            rows: enrollments.map((enrollment) {
-              final student = enrollment['students'];
-              final earned = items.fold<double>(0, (sum, item) => sum + (scores['${enrollment['id']}:${item['id']}'] ?? 0).toDouble());
-              final possible = items.fold<double>(0, (sum, item) => sum + (item['maximum_score'] as num).toDouble());
-              final average = GradeCalculator.transmutedPercentage(earned, possible,base:gradingBase);
-              return DataRow(cells: [
-                DataCell(SizedBox(width: 210, child: Row(children: [CircleAvatar(radius: 15, backgroundColor: SmartGradeColors.mustardSoft, foregroundColor: SmartGradeColors.black, child: Text('${student['first_name']}'.isEmpty ? '?' : '${student['first_name']}'.substring(0, 1), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 11))), const SizedBox(width: 10), Expanded(child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [Text('${student['last_name']}, ${student['first_name']}', overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12)), Text('${student['student_number']}', style: const TextStyle(color: SmartGradeColors.muted, fontSize: 10))]))]))),
-                ...items.map((item) { final key = '${enrollment['id']}:${item['id']}'; return DataCell(SizedBox(width: 72, child: TextFormField(key: ValueKey(key), initialValue: scores[key]?.toString() ?? '', textAlign: TextAlign.center, keyboardType: const TextInputType.numberWithOptions(decimal:true), onChanged: (value) => changeScore(enrollment['id'], item['id'], value.trim().isEmpty?null:num.tryParse(value), item['maximum_score']), decoration: const InputDecoration(isDense: true, contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 9))))); }),
-                DataCell(Text(earned.toStringAsFixed(0), style: const TextStyle(fontWeight: FontWeight.w800))),
-                DataCell(Container(padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5), decoration: BoxDecoration(color: average < 75 ? const Color(0xFFFFE8E8) : const Color(0xFFEAF4EC), borderRadius: BorderRadius.circular(12)), child: Text('${average.toStringAsFixed(1)}%', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: average < 75 ? SmartGradeColors.red : const Color(0xFF347147))))),
-              ]);
-            }).toList(),
-          )))))))),
-          if (MediaQuery.sizeOf(context).width >= 1180) ...[const SizedBox(width: 14), SizedBox(width:245,child:_Insights(onExport:exportCurrentCategoryCsv,onSchoolExport:exportSchoolGradesCsv))],
-        ])),
+        Expanded(child: category=='overall' ? _buildOverallRecord() : items.isEmpty ? _NoItems(categoryLabel:_categoryLabels[category]!,onAdd:addItem) : _buildScoreGrid()),
       ]),
     ),
+  );
+
+  Widget _buildScoreGrid()=>Container(
+    decoration:BoxDecoration(color:Colors.white,border:Border.all(color:SmartGradeColors.line),borderRadius:BorderRadius.circular(9)),
+    clipBehavior:Clip.antiAlias,
+    child:Row(children:[
+      SizedBox(width:245,child:Column(children:[
+        _fixedHeader('STUDENT',alignment:Alignment.centerLeft),
+        Expanded(child:ListView.builder(controller:studentVerticalController,itemExtent:60,itemCount:enrollments.length,itemBuilder:(context,index){
+          final student=enrollments[index]['students'] as Map<String,dynamic>;
+          final firstName=student['first_name'].toString();
+          return Container(
+            padding:const EdgeInsets.symmetric(horizontal:16),
+            decoration:const BoxDecoration(border:Border(bottom:BorderSide(color:SmartGradeColors.line))),
+            child:Row(children:[
+              CircleAvatar(radius:15,backgroundColor:SmartGradeColors.mustardSoft,foregroundColor:SmartGradeColors.black,child:Text(firstName.isEmpty?'?':firstName.substring(0,1),style:const TextStyle(fontWeight:FontWeight.w800,fontSize:11))),
+              const SizedBox(width:10),
+              Expanded(child:Column(mainAxisAlignment:MainAxisAlignment.center,crossAxisAlignment:CrossAxisAlignment.start,children:[
+                Text('${student['last_name']}, ${student['first_name']}',overflow:TextOverflow.ellipsis,maxLines:1,style:const TextStyle(fontWeight:FontWeight.w700,fontSize:12)),
+                Text('${student['student_number']}',style:const TextStyle(color:SmartGradeColors.muted,fontSize:10)),
+              ])),
+            ]),
+          );
+        })),
+      ])),
+      Expanded(child:LayoutBuilder(builder:(context,constraints){
+        final calculatedWidth=items.length*104.0;
+        final contentWidth=calculatedWidth<constraints.maxWidth?constraints.maxWidth:calculatedWidth;
+        return Scrollbar(
+          controller:scoreHorizontalController,
+          thumbVisibility:true,
+          trackVisibility:true,
+          interactive:true,
+          scrollbarOrientation:ScrollbarOrientation.bottom,
+          child:SingleChildScrollView(
+            controller:scoreHorizontalController,
+            scrollDirection:Axis.horizontal,
+            child:SizedBox(width:contentWidth,child:Column(children:[
+              SizedBox(height:56,child:Row(children:items.map((item)=>SizedBox(width:104,child:Center(child:Text('${item['title']}\nMAX ${item['maximum_score']}',textAlign:TextAlign.center,maxLines:2,overflow:TextOverflow.ellipsis,style:const TextStyle(fontSize:10,fontWeight:FontWeight.w700))))).toList())),
+              Expanded(child:ListView.builder(controller:scoreVerticalController,itemExtent:60,itemCount:enrollments.length,itemBuilder:(context,rowIndex){
+                final enrollment=enrollments[rowIndex];
+                return Container(
+                  decoration:const BoxDecoration(border:Border(bottom:BorderSide(color:SmartGradeColors.line))),
+                  child:Row(children:items.map((item){
+                    final key='${enrollment['id']}:${item['id']}';
+                    return SizedBox(width:104,child:Center(child:SizedBox(width:72,child:TextFormField(
+                      key:ValueKey(key),
+                      initialValue:scores[key]?.toString()??'',
+                      textAlign:TextAlign.center,
+                      keyboardType:const TextInputType.numberWithOptions(decimal:true),
+                      onChanged:(value)=>changeScore(enrollment['id'],item['id'],value.trim().isEmpty?null:num.tryParse(value),item['maximum_score']),
+                      decoration:const InputDecoration(isDense:true,contentPadding:EdgeInsets.symmetric(horizontal:8,vertical:9)),
+                    ))));
+                  }).toList()),
+                );
+              })),
+            ])),
+          ),
+        );
+      })),
+      SizedBox(width:178,child:Column(children:[
+        SizedBox(height:56,child:Row(children:[
+          Expanded(child:_fixedHeader('TOTAL')),
+          Expanded(child:_fixedHeader('AVERAGE')),
+        ])),
+        Expanded(child:ListView.builder(controller:summaryVerticalController,itemExtent:60,itemCount:enrollments.length,itemBuilder:(context,index){
+          final enrollment=enrollments[index];
+          final earned=items.fold<double>(0,(sum,item)=>sum+(scores['${enrollment['id']}:${item['id']}']??0).toDouble());
+          final possible=items.fold<double>(0,(sum,item)=>sum+(item['maximum_score'] as num).toDouble());
+          final average=GradeCalculator.transmutedPercentage(earned,possible,base:gradingBase);
+          return Container(
+            decoration:const BoxDecoration(border:Border(bottom:BorderSide(color:SmartGradeColors.line))),
+            child:Row(children:[
+              Expanded(child:Center(child:Text(earned.toStringAsFixed(0),style:const TextStyle(fontWeight:FontWeight.w800)))),
+              Expanded(child:Center(child:Container(padding:const EdgeInsets.symmetric(horizontal:9,vertical:5),decoration:BoxDecoration(color:average<75?const Color(0xFFFFE8E8):const Color(0xFFEAF4EC),borderRadius:BorderRadius.circular(12)),child:Text('${average.toStringAsFixed(1)}%',style:TextStyle(fontSize:11,fontWeight:FontWeight.w800,color:average<75?SmartGradeColors.red:const Color(0xFF347147)))))),
+            ]),
+          );
+        })),
+      ])),
+    ]),
+  );
+
+  Widget _fixedHeader(String label,{Alignment alignment=Alignment.center})=>Container(
+    height:56,
+    width:double.infinity,
+    alignment:alignment,
+    padding:const EdgeInsets.symmetric(horizontal:16),
+    color:const Color(0xFFF0EEEB),
+    child:Text(label,style:const TextStyle(fontSize:10,fontWeight:FontWeight.w800,letterSpacing:.7)),
   );
 
   Widget _buildOverallRecord(){
