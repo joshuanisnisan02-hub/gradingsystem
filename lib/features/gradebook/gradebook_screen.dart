@@ -615,7 +615,28 @@ class _Pill extends StatelessWidget {
 class _Insights extends StatelessWidget {
   const _Insights({required this.onExport,required this.onSchoolExport});
   final VoidCallback onExport,onSchoolExport;
-  @override Widget build(BuildContext context) => Container(padding: const EdgeInsets.all(18), decoration: BoxDecoration(color: Colors.white, border: Border.all(color: SmartGradeColors.line), borderRadius: BorderRadius.circular(9)), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('CLASS INSIGHTS', style: TextStyle(fontSize: 10, letterSpacing: 1.1, fontWeight: FontWeight.w800)), const SizedBox(height: 18), const _Insight(icon: Icons.warning_amber_rounded, color: SmartGradeColors.red, title: 'Missing scores', detail: 'Review blank cells before finalizing.'), const Divider(height: 30), const _Insight(icon: Icons.lightbulb_outline_rounded, color: SmartGradeColors.mustard, title: 'Quick tip', detail: 'Press Enter after each score to save.'), const Spacer(), const Text('ACTIONS', style: TextStyle(fontSize: 9, letterSpacing: 1.1, color: SmartGradeColors.muted, fontWeight: FontWeight.w800)), const SizedBox(height: 12), ListTile(onTap:onExport,contentPadding:EdgeInsets.zero,dense:true,leading:const Icon(Icons.download_outlined,size:18),title:const Text('Export selected gradebook',style:TextStyle(fontSize:11))),ListTile(onTap:onSchoolExport,contentPadding:EdgeInsets.zero,dense:true,leading:const Icon(Icons.school_outlined,size:18),title:const Text('Export school grades CSV',style:TextStyle(fontSize:11))),const ListTile(contentPadding:EdgeInsets.zero,dense:true,leading:Icon(Icons.print_outlined,size:18),title:Text('Print class record',style:TextStyle(fontSize:11)))]));
+  @override Widget build(BuildContext context) => Container(
+    decoration: BoxDecoration(color: Colors.white, border: Border.all(color: SmartGradeColors.line), borderRadius: BorderRadius.circular(9)),
+    clipBehavior: Clip.antiAlias,
+    child: Scrollbar(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(18),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('CLASS INSIGHTS', style: TextStyle(fontSize: 10, letterSpacing: 1.1, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 18),
+          const _Insight(icon: Icons.warning_amber_rounded, color: SmartGradeColors.red, title: 'Missing scores', detail: 'Review blank cells before finalizing.'),
+          const Divider(height: 30),
+          const _Insight(icon: Icons.lightbulb_outline_rounded, color: SmartGradeColors.mustard, title: 'Quick tip', detail: 'Scores save automatically as you enter them.'),
+          const SizedBox(height: 24),
+          const Text('ACTIONS', style: TextStyle(fontSize: 9, letterSpacing: 1.1, color: SmartGradeColors.muted, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 6),
+          ListTile(onTap:onExport,contentPadding:EdgeInsets.zero,dense:true,visualDensity:VisualDensity.compact,leading:const Icon(Icons.download_outlined,size:18),title:const Text('Export selected gradebook',style:TextStyle(fontSize:11))),
+          ListTile(onTap:onSchoolExport,contentPadding:EdgeInsets.zero,dense:true,visualDensity:VisualDensity.compact,leading:const Icon(Icons.school_outlined,size:18),title:const Text('Export school grades CSV',style:TextStyle(fontSize:11))),
+          const ListTile(contentPadding:EdgeInsets.zero,dense:true,visualDensity:VisualDensity.compact,leading:Icon(Icons.print_outlined,size:18),title:Text('Print class record',style:TextStyle(fontSize:11))),
+        ]),
+      ),
+    ),
+  );
 }
 
 class _Insight extends StatelessWidget {
