@@ -22,8 +22,10 @@ class _GradebookScreenState extends State<GradebookScreen> {
   bool loading=true, saving=false;
   List<Map<String,dynamic>> enrollments=[], items=[];
   final Map<String,num?> scores={};
+  final Map<String,String> scoreStatuses={};
   String gradingPeriod='prelim';
   String category='quiz';
+  DateTime attendanceDate=DateUtils.dateOnly(DateTime.now());
   int gradingBase=30;
   Map<String,dynamic>? classInfo;
   Map<String,double> weights=Map.of(_defaultWeights);
@@ -72,9 +74,10 @@ class _GradebookScreenState extends State<GradebookScreen> {
       assessments.sort(_compareAssessmentItems);
       final savedWeights=await supabase.from('grading_weights').select('category, weight').eq('class_id',widget.classId).eq('grading_period',gradingPeriod);
       final classSettings=await supabase.from('classes').select('grading_base, subject_code, subject_title, section').eq('id',widget.classId).single();
-      final current=assessments.isEmpty ? <dynamic>[] : await supabase.from('scores').select('enrollment_id, assessment_item_id, raw_score').inFilter('assessment_item_id', assessments.map((e)=>e['id']).toList());
+      final current=assessments.isEmpty ? <dynamic>[] : await supabase.from('scores').select('enrollment_id, assessment_item_id, raw_score, status').inFilter('assessment_item_id', assessments.map((e)=>e['id']).toList());
       scores.clear();
-      for(final row in current){scores['${row['enrollment_id']}:${row['assessment_item_id']}']=row['raw_score'];}
+      scoreStatuses.clear();
+      for(final row in current){final key='${row['enrollment_id']}:${row['assessment_item_id']}';scores[key]=row['raw_score'];scoreStatuses[key]='${row['status']}';}
       final loaded=Map<String,double>.of(_defaultWeights);
       for(final row in savedWeights){loaded['${row['category']}']=(row['weight'] as num).toDouble();}
       setState((){enrollments=List.from(roster);items=assessments;weights=loaded;classInfo=Map<String,dynamic>.from(classSettings);gradingBase=(classSettings['grading_base'] as num?)?.toInt()??30;loading=false;});
@@ -88,6 +91,59 @@ class _GradebookScreenState extends State<GradebookScreen> {
     scoreDebounces[key]=Timer(const Duration(milliseconds:700),()=>save(enrollmentId,itemId,value));
   }
   Future<void> save(String enrollmentId,String itemId,num? value) async {await supabase.from('scores').upsert({'enrollment_id':enrollmentId,'assessment_item_id':itemId,'raw_score':value,'status':value==null?'missing':'scored','updated_by':supabase.auth.currentUser!.id},onConflict:'enrollment_id,assessment_item_id');if(mounted)setState(()=>saving=false);}
+
+  String _attendanceDateKey(DateTime date)=>'${date.year.toString().padLeft(4,'0')}-${date.month.toString().padLeft(2,'0')}-${date.day.toString().padLeft(2,'0')}';
+  String _attendanceDateLabel(DateTime date){
+    const months=['January','February','March','April','May','June','July','August','September','October','November','December'];
+    return '${months[date.month-1]} ${date.day}, ${date.year}';
+  }
+  Map<String,dynamic>? get _selectedAttendanceItem{
+    final key=_attendanceDateKey(attendanceDate);
+    for(final item in items){if('${item['title']}'==key)return item;}
+    return null;
+  }
+  Future<void> chooseAttendanceDate() async {
+    final chosen=await showDatePicker(context:context,initialDate:attendanceDate,firstDate:DateTime(DateTime.now().year-2),lastDate:DateTime(DateTime.now().year+2),helpText:'Select class attendance date');
+    if(chosen!=null&&mounted)setState(()=>attendanceDate=DateUtils.dateOnly(chosen));
+  }
+  Future<void> startAttendance() async {
+    if(_selectedAttendanceItem!=null)return;
+    setState(()=>saving=true);
+    try{
+      final nextPosition=items.fold<int>(-1,(current,item){final position=(item['position'] as num?)?.toInt()??-1;return position>current?position:current;})+1;
+      final item=Map<String,dynamic>.from(await supabase.from('assessment_items').insert({'class_id':widget.classId,'grading_period':gradingPeriod,'category':'attendance','title':_attendanceDateKey(attendanceDate),'maximum_score':1,'position':nextPosition,'source':'manual'}).select().single());
+      if(enrollments.isNotEmpty){
+        final userId=supabase.auth.currentUser!.id;
+        await supabase.from('scores').upsert(enrollments.map((enrollment)=>{'enrollment_id':enrollment['id'],'assessment_item_id':item['id'],'raw_score':1,'status':'scored','updated_by':userId}).toList(),onConflict:'enrollment_id,assessment_item_id');
+      }
+      await load();
+      if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Attendance started. Everyone was marked present; update exceptions only.')));
+    }catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Attendance could not be started: $e')));}
+    finally{if(mounted)setState(()=>saving=false);}
+  }
+  Future<void> markAllPresent() async {
+    final item=_selectedAttendanceItem;
+    if(item==null){await startAttendance();return;}
+    setState(()=>saving=true);
+    try{
+      final userId=supabase.auth.currentUser!.id;
+      await supabase.from('scores').upsert(enrollments.map((enrollment)=>{'enrollment_id':enrollment['id'],'assessment_item_id':item['id'],'raw_score':1,'status':'scored','updated_by':userId}).toList(),onConflict:'enrollment_id,assessment_item_id');
+      await load();
+    }catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Attendance could not be updated: $e')));}
+    finally{if(mounted)setState(()=>saving=false);}
+  }
+  Future<void> setAttendanceStatus(Map<String,dynamic> enrollment,String status) async {
+    final item=_selectedAttendanceItem;
+    if(item==null)return;
+    final key='${enrollment['id']}:${item['id']}';
+    final value=status=='absent'?0:status=='late'?0.5:1;
+    final storedStatus=status=='late'||status=='excused'?status:'scored';
+    setState((){scores[key]=value;scoreStatuses[key]=storedStatus;saving=true;});
+    try{
+      await supabase.from('scores').upsert({'enrollment_id':enrollment['id'],'assessment_item_id':item['id'],'raw_score':value,'status':storedStatus,'updated_by':supabase.auth.currentUser!.id},onConflict:'enrollment_id,assessment_item_id');
+    }catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Attendance could not be saved: $e')));}
+    finally{if(mounted)setState(()=>saving=false);}
+  }
   Future<void> editWeights() async {
     final updated=await showDialog<_GradingSettingsResult>(context: context,builder: (_)=>_WeightDialog(initial: weights,initialBase:gradingBase));
     if(updated==null)return;
@@ -373,7 +429,7 @@ class _GradebookScreenState extends State<GradebookScreen> {
           SizedBox(width:150,child:DropdownButtonFormField<String>(initialValue:gradingPeriod,decoration:const InputDecoration(labelText:'Grading period',isDense:true),items:_periodLabels.entries.map((entry)=>DropdownMenuItem(value:entry.key,child:Text(entry.value))).toList(),onChanged:(value){if(value!=null&&value!=gradingPeriod){gradingPeriod=value;load();}})),
           ..._categoryLabels.entries.map((entry)=>ChoiceChip(label:Text(entry.value),selected:category==entry.key,onSelected:(_){if(category!=entry.key){category=entry.key;load();}})),
           if(category=='examination')OutlinedButton.icon(onPressed:saving?null:importExamCsv,icon:const Icon(Icons.upload_file_outlined,size:17),label:const Text('Import exam CSV')),
-          if(category!='overall')OutlinedButton.icon(onPressed:saving?null:addItem,icon:const Icon(Icons.add,size:17),label:const Text('Add item')),
+          if(category!='overall'&&category!='attendance')OutlinedButton.icon(onPressed:saving?null:addItem,icon:const Icon(Icons.add,size:17),label:const Text('Add item')),
           PopupMenuButton<String>(
             tooltip:'Export gradebook',
             enabled:!saving,
@@ -383,12 +439,68 @@ class _GradebookScreenState extends State<GradebookScreen> {
           ),
         ]),
         const SizedBox(height: 19),
-        Container(padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10), decoration: BoxDecoration(color: Colors.white, border: Border.all(color: SmartGradeColors.line), borderRadius: BorderRadius.circular(9)), child: const Row(children: [Icon(Icons.info_outline_rounded, color: SmartGradeColors.mustard, size: 19), SizedBox(width: 9), Expanded(child: Text('Enter a score, then press Enter. Changes save automatically.', style: TextStyle(fontSize: 11, color: SmartGradeColors.muted))), Icon(Icons.keyboard_alt_outlined, size: 18, color: SmartGradeColors.muted)])),
+        Container(padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10), decoration: BoxDecoration(color: Colors.white, border: Border.all(color: SmartGradeColors.line), borderRadius: BorderRadius.circular(9)), child: Row(children: [const Icon(Icons.info_outline_rounded, color: SmartGradeColors.mustard, size: 19), const SizedBox(width: 9), Expanded(child: Text(category=='attendance'?'Start a class date to mark everyone Present, then update only the exceptions.':'Enter scores directly. Changes save automatically.', style: const TextStyle(fontSize: 11, color: SmartGradeColors.muted))), Icon(category=='attendance'?Icons.calendar_month_outlined:Icons.keyboard_alt_outlined, size: 18, color: SmartGradeColors.muted)])),
         const SizedBox(height: 14),
-        Expanded(child: category=='overall' ? _buildOverallRecord() : items.isEmpty ? _NoItems(categoryLabel:_categoryLabels[category]!,onAdd:addItem) : Row(crossAxisAlignment:CrossAxisAlignment.stretch,children:[Expanded(child:_buildScoreGrid()),if(MediaQuery.sizeOf(context).width>=1180)...[const SizedBox(width:14),SizedBox(width:245,child:_Insights(onExport:exportCurrentCategoryCsv,onSchoolExport:exportSchoolGradesCsv))]])),
+        Expanded(child: category=='overall' ? _buildOverallRecord() : category=='attendance' ? _buildAttendanceCalendar() : items.isEmpty ? _NoItems(categoryLabel:_categoryLabels[category]!,onAdd:addItem) : Row(crossAxisAlignment:CrossAxisAlignment.stretch,children:[Expanded(child:_buildScoreGrid()),if(MediaQuery.sizeOf(context).width>=1180)...[const SizedBox(width:14),SizedBox(width:245,child:_Insights(onExport:exportCurrentCategoryCsv,onSchoolExport:exportSchoolGradesCsv))]])),
       ]),
     ),
   );
+
+  Widget _buildAttendanceCalendar(){
+    final item=_selectedAttendanceItem;
+    String attendanceStatus(Map<String,dynamic> enrollment){
+      if(item==null)return 'not_recorded';
+      final key='${enrollment['id']}:${item['id']}';
+      final stored=scoreStatuses[key];
+      if(stored=='late'||stored=='excused')return stored!;
+      if((scores[key]??0)==0)return 'absent';
+      return 'present';
+    }
+    final counts=<String,int>{'present':0,'absent':0,'late':0,'excused':0};
+    if(item!=null){for(final enrollment in enrollments){final status=attendanceStatus(enrollment);counts[status]=(counts[status]??0)+1;}}
+    return Container(
+      decoration:BoxDecoration(color:Colors.white,border:Border.all(color:SmartGradeColors.line),borderRadius:BorderRadius.circular(9)),
+      clipBehavior:Clip.antiAlias,
+      child:Column(children:[
+        Container(
+          padding:const EdgeInsets.all(16),
+          color:const Color(0xFFF7F5F2),
+          child:Wrap(spacing:10,runSpacing:10,crossAxisAlignment:WrapCrossAlignment.center,children:[
+            IconButton(tooltip:'Previous day',onPressed:()=>setState(()=>attendanceDate=attendanceDate.subtract(const Duration(days:1))),icon:const Icon(Icons.chevron_left)),
+            OutlinedButton.icon(onPressed:chooseAttendanceDate,icon:const Icon(Icons.calendar_month_outlined),label:Text(_attendanceDateLabel(attendanceDate))),
+            IconButton(tooltip:'Next day',onPressed:()=>setState(()=>attendanceDate=attendanceDate.add(const Duration(days:1))),icon:const Icon(Icons.chevron_right)),
+            TextButton(onPressed:()=>setState(()=>attendanceDate=DateUtils.dateOnly(DateTime.now())),child:const Text('Today')),
+            if(item==null)FilledButton.icon(onPressed:saving?null:startAttendance,icon:const Icon(Icons.how_to_reg_outlined),label:const Text('Start attendance'))
+            else OutlinedButton.icon(onPressed:saving?null:markAllPresent,icon:const Icon(Icons.done_all),label:const Text('Mark all present')),
+            if(item!=null)...[
+              _AttendanceCount(label:'Present',count:counts['present']!,color:const Color(0xFF347147)),
+              _AttendanceCount(label:'Absent',count:counts['absent']!,color:SmartGradeColors.red),
+              _AttendanceCount(label:'Late',count:counts['late']!,color:SmartGradeColors.mustard),
+              _AttendanceCount(label:'Excused',count:counts['excused']!,color:const Color(0xFF4267A8)),
+            ],
+          ]),
+        ),
+        if(item==null)Expanded(child:Center(child:Column(mainAxisSize:MainAxisSize.min,children:[const Icon(Icons.calendar_today_outlined,size:48,color:SmartGradeColors.red),const SizedBox(height:14),Text('No attendance for ${_attendanceDateLabel(attendanceDate)}',style:const TextStyle(fontSize:17,fontWeight:FontWeight.w800)),const SizedBox(height:6),const Text('Start attendance to mark the whole class Present automatically.',style:TextStyle(color:SmartGradeColors.muted)),const SizedBox(height:18),FilledButton.icon(onPressed:saving?null:startAttendance,icon:const Icon(Icons.how_to_reg_outlined),label:const Text('Start attendance'))])))
+        else Expanded(child:ListView.separated(itemCount:enrollments.length,separatorBuilder:(_,__)=>const Divider(height:1),itemBuilder:(context,index){
+          final enrollment=enrollments[index];
+          final student=enrollment['students'] as Map<String,dynamic>;
+          final status=attendanceStatus(enrollment);
+          return Padding(
+            padding:const EdgeInsets.symmetric(horizontal:16,vertical:9),
+            child:Row(children:[
+              CircleAvatar(radius:17,backgroundColor:SmartGradeColors.mustardSoft,foregroundColor:SmartGradeColors.black,child:Text('${student['first_name']}'.isEmpty?'?':'${student['first_name']}'[0],style:const TextStyle(fontWeight:FontWeight.w800))),
+              const SizedBox(width:11),
+              Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text('${student['last_name']}, ${student['first_name']}',overflow:TextOverflow.ellipsis,style:const TextStyle(fontSize:12,fontWeight:FontWeight.w800)),Text('${student['student_number']}',style:const TextStyle(fontSize:10,color:SmartGradeColors.muted))])),
+              _AttendanceStatusButton(label:'Present',selected:status=='present',color:const Color(0xFF347147),onTap:()=>setAttendanceStatus(enrollment,'present')),
+              _AttendanceStatusButton(label:'Absent',selected:status=='absent',color:SmartGradeColors.red,onTap:()=>setAttendanceStatus(enrollment,'absent')),
+              _AttendanceStatusButton(label:'Late',selected:status=='late',color:SmartGradeColors.mustard,onTap:()=>setAttendanceStatus(enrollment,'late')),
+              _AttendanceStatusButton(label:'Excused',selected:status=='excused',color:const Color(0xFF4267A8),onTap:()=>setAttendanceStatus(enrollment,'excused')),
+            ]),
+          );
+        })),
+      ]),
+    );
+  }
 
   Widget _buildScoreGrid()=>Container(
     decoration:BoxDecoration(color:Colors.white,border:Border.all(color:SmartGradeColors.line),borderRadius:BorderRadius.circular(9)),
@@ -610,6 +722,40 @@ class _Pill extends StatelessWidget {
   const _Pill({required this.icon, required this.text});
   final IconData icon; final String text;
   @override Widget build(BuildContext context) => Container(padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8), decoration: BoxDecoration(color: Colors.white, border: Border.all(color: SmartGradeColors.line), borderRadius: BorderRadius.circular(18)), child: Row(mainAxisSize: MainAxisSize.min, children: [Icon(icon, size: 15, color: SmartGradeColors.red), const SizedBox(width: 6), Text(text, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700))]));
+}
+
+class _AttendanceCount extends StatelessWidget {
+  const _AttendanceCount({required this.label,required this.count,required this.color});
+  final String label;
+  final int count;
+  final Color color;
+  @override Widget build(BuildContext context)=>Container(
+    padding:const EdgeInsets.symmetric(horizontal:10,vertical:7),
+    decoration:BoxDecoration(color:color.withValues(alpha:.1),borderRadius:BorderRadius.circular(16)),
+    child:Text('$label $count',style:TextStyle(fontSize:10,fontWeight:FontWeight.w800,color:color)),
+  );
+}
+
+class _AttendanceStatusButton extends StatelessWidget {
+  const _AttendanceStatusButton({required this.label,required this.selected,required this.color,required this.onTap});
+  final String label;
+  final bool selected;
+  final Color color;
+  final VoidCallback onTap;
+  @override Widget build(BuildContext context)=>Padding(
+    padding:const EdgeInsets.only(left:6),
+    child:InkWell(
+      borderRadius:BorderRadius.circular(16),
+      onTap:onTap,
+      child:Container(
+        width:72,
+        padding:const EdgeInsets.symmetric(vertical:7),
+        alignment:Alignment.center,
+        decoration:BoxDecoration(color:selected?color:Colors.white,border:Border.all(color:selected?color:SmartGradeColors.line),borderRadius:BorderRadius.circular(16)),
+        child:Text(label,style:TextStyle(fontSize:10,fontWeight:FontWeight.w800,color:selected?Colors.white:SmartGradeColors.muted)),
+      ),
+    ),
+  );
 }
 
 class _Insights extends StatelessWidget {
