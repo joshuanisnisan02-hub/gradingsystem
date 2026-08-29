@@ -106,6 +106,12 @@ class _GradebookScreenState extends State<GradebookScreen> {
     final chosen=await showDatePicker(context:context,initialDate:attendanceDate,firstDate:DateTime(DateTime.now().year-2),lastDate:DateTime(DateTime.now().year+2),helpText:'Select class attendance date');
     if(chosen!=null&&mounted)setState(()=>attendanceDate=DateUtils.dateOnly(chosen));
   }
+  Future<void> goToNextAttendanceDay() async {
+    final next=attendanceDate.add(const Duration(days:1));
+    setState(()=>attendanceDate=next);
+    await Future<void>.delayed(Duration.zero);
+    if(_selectedAttendanceItem==null)await startAttendance();
+  }
   Future<void> startAttendance() async {
     if(_selectedAttendanceItem!=null)return;
     setState(()=>saving=true);
@@ -468,7 +474,7 @@ class _GradebookScreenState extends State<GradebookScreen> {
           child:Wrap(spacing:10,runSpacing:10,crossAxisAlignment:WrapCrossAlignment.center,children:[
             IconButton(tooltip:'Previous day',onPressed:()=>setState(()=>attendanceDate=attendanceDate.subtract(const Duration(days:1))),icon:const Icon(Icons.chevron_left)),
             OutlinedButton.icon(onPressed:chooseAttendanceDate,icon:const Icon(Icons.calendar_month_outlined),label:Text(_attendanceDateLabel(attendanceDate))),
-            IconButton(tooltip:'Next day',onPressed:()=>setState(()=>attendanceDate=attendanceDate.add(const Duration(days:1))),icon:const Icon(Icons.chevron_right)),
+            IconButton(tooltip:'Next day and start attendance',onPressed:saving?null:goToNextAttendanceDay,icon:const Icon(Icons.chevron_right)),
             TextButton(onPressed:()=>setState(()=>attendanceDate=DateUtils.dateOnly(DateTime.now())),child:const Text('Today')),
             if(item==null)FilledButton.icon(onPressed:saving?null:startAttendance,icon:const Icon(Icons.how_to_reg_outlined),label:const Text('Start attendance'))
             else OutlinedButton.icon(onPressed:saving?null:markAllPresent,icon:const Icon(Icons.done_all),label:const Text('Mark all present')),
