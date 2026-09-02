@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -23,12 +26,38 @@ Future<void> main() async {
   );
 
   await Supabase.initialize(url: url, anonKey: key);
+  // The hosted teacher workspace requires a fresh login whenever the web app
+  // is opened or refreshed. Local scope clears only this browser session and
+  // does not revoke sessions on the teacher's other devices.
+  if (kIsWeb) {
+    await Supabase.instance.client.auth.signOut(scope: SignOutScope.local);
+  }
   runApp(const ProviderScope(child: SmartGradeApp()));
 }
 
+class AuthRouterRefresh extends ChangeNotifier {
+  AuthRouterRefresh() {
+    _subscription = Supabase.instance.client.auth.onAuthStateChange.listen(
+      (_) => notifyListeners(),
+      onError: (_, __) => notifyListeners(),
+    );
+  }
+
+  late final StreamSubscription<AuthState> _subscription;
+
+  @override
+  void dispose() {
+    _subscription.cancel();
+    super.dispose();
+  }
+}
+
 final routerProvider = Provider<GoRouter>((ref) {
+  final authRefresh = AuthRouterRefresh();
+  ref.onDispose(authRefresh.dispose);
   return GoRouter(
     initialLocation: '/login',
+    refreshListenable: authRefresh,
     redirect: (context, state) {
       final signedIn = Supabase.instance.client.auth.currentSession != null;
       if (!signedIn && state.matchedLocation != '/login') return '/login';
