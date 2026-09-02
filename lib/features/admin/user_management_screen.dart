@@ -68,7 +68,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
           DataCell(Text(_roleLabel(user['role']?.toString()))),
           DataCell(Chip(label: Text(user['must_change_password'] == true ? 'Change required' : 'Password set'), backgroundColor: user['must_change_password'] == true ? const Color(0xFFFFE7BE) : const Color(0xFFE4F2E8))),
         ])).toList(),
-      ))),
+      )))),
     ])),
   );
 }
