@@ -149,6 +149,7 @@ class _Navigation extends StatelessWidget {
       _NavItem(label: 'Classes', icon: Icons.dashboard_outlined, active: active == 'Classes', onTap: () => context.go('/classes')),
       _NavItem(label: 'Gradebooks', icon: Icons.table_chart_outlined, active: active == 'Gradebooks' || active == 'Gradebook', onTap: () => context.go('/gradebooks')),
       _NavItem(label: 'Reports', icon: Icons.description_outlined, active: active == 'Reports', onTap: () => context.go('/reports')),
+      _AdminUsersItem(active: active == 'Users'),
       const Padding(padding: EdgeInsets.fromLTRB(20, 24, 20, 10), child: Text('QUICK FILTERS', style: TextStyle(color: Colors.white38, fontSize: 9, fontWeight: FontWeight.w700, letterSpacing: 1.2))),
       const _Filter(label: 'Active classes', color: SmartGradeColors.red),
       const _Filter(label: 'Missing scores', color: SmartGradeColors.mustard),
@@ -161,6 +162,28 @@ class _Navigation extends StatelessWidget {
       )),
     ])),
   );
+}
+
+class _AdminUsersItem extends StatefulWidget {
+  const _AdminUsersItem({required this.active});
+  final bool active;
+  @override
+  State<_AdminUsersItem> createState() => _AdminUsersItemState();
+}
+
+class _AdminUsersItemState extends State<_AdminUsersItem> {
+  late final Future<bool> allowed = _allowed();
+  Future<bool> _allowed() async {
+    final id = supabase.auth.currentUser?.id;
+    if (id == null) return false;
+    final profile = await supabase.from('profiles').select('role').eq('id', id).maybeSingle();
+    return profile?['role'] == 'administrator';
+  }
+  @override
+  Widget build(BuildContext context) => FutureBuilder<bool>(future: allowed, builder: (context, snapshot) {
+    if (snapshot.data != true) return const SizedBox.shrink();
+    return _NavItem(label: 'User Management', icon: Icons.manage_accounts_outlined, active: widget.active, onTap: () => context.go('/admin/users'));
+  });
 }
 
 class _RailButton extends StatelessWidget {
