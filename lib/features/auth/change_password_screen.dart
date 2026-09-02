@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-
 import '../../core/design_system.dart';
 import '../../core/supabase_client.dart';
 
@@ -31,10 +29,9 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
     }
     setState(() { loading = true; error = null; });
     try {
-      await supabase.auth.updateUser(UserAttributes(password: next));
       final response = await supabase.functions.invoke(
         'user-management',
-        body: {'action': 'completePasswordChange'},
+        body: {'action': 'changePassword', 'password': next},
       );
       final data = response.data;
       if (data is Map && data['error'] != null) throw Exception(data['error']);
