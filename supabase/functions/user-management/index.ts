@@ -38,7 +38,14 @@ Deno.serve(async (request) => {
     return json({ error: "Invalid request body." }, 400);
   }
 
-  if (body.action === "completePasswordChange") {
+  if (body.action === "changePassword") {
+    const password = String(body.password ?? "");
+    if (password.length < 8) return json({ error: "Use at least 8 characters." }, 400);
+    const { error: passwordError } = await adminClient.auth.admin.updateUserById(
+      authData.user.id,
+      { password },
+    );
+    if (passwordError) return json({ error: passwordError.message }, 400);
     const { error } = await adminClient
       .from("profiles")
       .update({ must_change_password: false, updated_at: new Date().toISOString() })
